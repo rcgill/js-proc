@@ -1,0 +1,102 @@
+lexical tokens:
+:num    (value of the number)
+:punc   []{}(),.;:
+:string (value of the string)
+:comment (value of single-line comment, including // and new-line)
+:regexp (value of regular expression)
+:operators any of (notice that these aren't legal, the "|" are presented unescapted) 
+           :in :instanceof :typeof :new :void :delete :++ :-- :+ :- :! :~ :& :| :^ :* :/ :%
+                  :>> :<< :>>> :< :> :<= :>= :== :=== :!= :!== :? := :+= :-= :/= :*= :%= :>>= :<<=
+                  :>>>= :~= :%= :|= :^= :&& :||
+
+:atom :false :null :true :undefined :nan
+:name
+:keyword :break :case :catch :continue :debugger :default :do :else 
+                    :finally :for :function :if :return :switch
+                    :throw :try :var :while :with
+
+ast node types
+
+toplevel --> <list of statements>
+seq --> <expression> <expression>
+assign --> <assignable-expression> <expression>
+unary-prefix -->  <op> <expr>
+atom | num | string | regexp | name --> value of token
+dot 
+block --> <list of statements> // an empty statement also returns a block.
+case --> <expr>
+debugger
+default
+switch --> <expr> <list of case|default, statements> list has even number of elements
+do --> <condition> <statement>
+return --> optional expression
+throw --> <expr>
+while --> <expr> <statement>
+with --> <expr> <statement>
+label --> <label> <statement> can't get this to work
+break
+continue --> [label]
+for-in --> var name object statement
+for --> init test step statement
+defun | function --> name <list of  argnames> <list of statements>
+if --> condition statement else
+try --> statement catch-statement finally-statement
+var --> <list of string or (string, value) >
+new --> <expr> <list of arguments>
+atom | number | string | regexp | name --> value
+array --> <list of exprs>
+object --> <list of name, exprs>
+dot --> lhs rhs
+sub --> lhs rhs
+call --> lhs <list or arguments>
+binary --> op lhs rhs
+conditional --> expr yes-expr no-expr
+
+toplevel
+        statement
+                simple-statement
+                        expression (an expression; possibly several separated by commas)
+                                maybe-assign (an expression that may be assignable; handles a= b= 123)
+                                        maybe-conditional
+                                                expr-ops
+                                                        expr-atom
+                                                                new*
+                                                                subscripts
+                                                                array*
+                                                                object*
+                                                                function*
+                                                        expr-op
+
+
+Errors:
+PARSE-JS> (parse-js-string "a= undefined;")
+(:TOPLEVEL ((:STAT (:ASSIGN T (:NAME "a") (:NAME "undefined")))))
+/sb
+(:TOPLEVEL ((:STAT (:ASSIGN T (:NAME "a") (:ATOM :UNDEFINED)))))
+
+PARSE-JS> (parse-js-string "a= new new(123);")
+(:TOPLEVEL ((:STAT (:ASSIGN T (:NAME "a") (:NEW (:NEW (:NUM 123) NIL) NIL)))))
+/sb
+illegal
+
+PARSE-JS> (parse-js-string "a.= = 7;")
+(:TOPLEVEL ((:STAT (:ASSIGN T (:DOT (:NAME "a") "=") (:NUM 7)))))
+/sb
+illegal; don't understand purpose of using (as-name) in "(subscripts (as :dot expr (as-name)) allow-calls))" in subscripts
+
+PARSE-JS> (parse-js-string ";;a.b.c= 7;;")
+(:TOPLEVEL
+ ((:BLOCK) (:BLOCK)
+  (:STAT (:ASSIGN T (:DOT (:DOT (:NAME "a") "b") "c") (:NUM 7))) (:BLOCK)))
+/sb
+why generate the (:BLOCK) nodes?
+
+PARSE-JS> (parse-js-string "var a=1, b=2;")
+(:TOPLEVEL ((:VAR (("a" :SEQ (:NUM 1) (:ASSIGN T (:NAME "b") (:NUM 2)))))))
+/sb
+(:TOPLEVEL ((:VAR (("a" :NUM 1) ("b" :NUM 2)))))
+
+
+DELTAS:
+
+renamed "expression-allowed" to "regex-allowed" in tokenize.lisp
