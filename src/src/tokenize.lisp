@@ -255,32 +255,41 @@
     ))
 
 (defun fold-comments (tokens)
-  (let ((i 0))
-    (labels (
-             (next () (prog1 (aref tokens i) (incf i)))
-             (peek () (aref tokens i))
-             (peek-is-comment () (token-type-p (peek) :comment)))
-      (do ((last-non-comment-token-line -2)
-           (result (make-array (length tokens) :element-type 'token :fill-pointer 0)))
-          ((= i (length tokens)) result)
-        (if (peek-is-comment)
+  (let* ((i -1)
+         (token-count (length tokens))
+         (result (make-array token-count :element-type 'token :fill-pointer 0))
+         (last-non-comment-token-line -2))
+    (labels 
+        ((next () 
+           (aref tokens (incf i)))
+
+         (get-comment-count (start-line)
+           (do* ((i (1+ i))
+                 (token (aref tokens i) (aref tokens (incf i)))
+                 (line (1+ start-line) (incf line)))
+                ((or (not (token-type-p token :comment)) (/= (token-line token) line)) (- line start-line)))))
+
+      (do ((token (next) (next)))
+          ((= i token-count) result)
+        (format t "token number: ~A:(~A)~%" i (token-line token))
+        (if (token-type-p token :comment)
             ;aggregate all the comments that are on contiguous lines into one value
             ;if they start on the same or next line as another type of token, then fold into that token
             ;otherwise, if they end on the same or previous line of another token type, then fold into that token (NOTE: currently commented out)
             ;otherwise, make them their own token
-            (do* ((token (next) (next))
-                  (start-line (token-line token))
-                  (start-char (token-char token))
-                  (start-newline-before (token-newline-before token)) ;this appears to be useless, but we carry it just in case is becomes useful
-                  (end-line (token-line token) (token-line token))
-                  (comment (token-value token) (concatenate 'string comment (token-value token))))
-                 ((not (peek-is-comment)) 
-                  (cond ((>= (1+ last-non-comment-token-line) start-line) (setf (token-comment (aref result (1- (fill-pointer result)))) comment))
-                        ;for the moment, don't fold forward
-                        ;((<= (1- (token-line (peek))) end-line) (setf (token-comment (peek)) comment))
-                        (t (vector-push (make-token :type :comment :value comment :line start-line :char start-char :newline-before start-newline-before) result)))))
-            (let ((token (next))) 
-              (progn (setf last-non-comment-token-line (token-line token)) (vector-push token result))))))))
-  
-(defun quicktest2 ()
-  (format t "this is a quicktest2"))
+            (let* ((start-line (token-line token))
+                   (start-char (token-char token))
+                   (start-newline-before (token-newline-before token)) ;this appears to be useless, but we carry it just in case is becomes useful
+                   (end-line (token-line token))
+                   (comment-count (get-comment-count start-line))
+                   (comment (make-array comment-count :element-type 'string :fill-pointer 0)))
+              ;(vector-push (token-value token) comment)
+              (format t "comment count ~A~%" comment-count)
+              (dotimes (i (1- comment-count))
+                (setf token (next) end-line (token-line token))
+                (vector-push (token-value token) comment))
+              (format t "comment: ~A~%" comment)
+              (if (>= (1+ last-non-comment-token-line) start-line) 
+                  (setf (token-comment (aref result (1- (fill-pointer result)))) comment)
+                  (vector-push (make-token :type :comment :value comment :line start-line :char start-char :newline-before start-newline-before) result)))
+            (progn (setf last-non-comment-token-line (token-line token)) (vector-push token result)))))))
