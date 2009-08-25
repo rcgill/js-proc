@@ -3,7 +3,8 @@
 #|
   Multi-line, multi-chunk pragmas:
 
-  //mu(docbook)  --markup follows; () gives schema
+  //mu(<...>)    --markup follows; () gives schema
+  //mu(docbook)  --docbook follows
   //mu(md)       --markdown follows
   //mu(markdown) --markdown follows
   ///            --end any previous pragma; return to markdown
@@ -12,7 +13,7 @@
 
   //#          --pragma for eval preprocessing
   //namespace  --object that serves as a namespace
-  //const      --constant variable
+  //const      --object that servse as a constant
   //enum       --object than serves as an enumeration
   //type       --the documented item is a type
 
@@ -25,7 +26,7 @@
   //return --a return section
   //r      --returns (either a return section or a single item in a return section)
   //throws --throws
-  //t      --throws (either a throws sectino of a single item in a throw section)
+  //t      --throws (either a throws section of a single item in a throw section)
   //c      --condition in a return/throw section or code otherwise
   //code   --code
   //todo   --to do note
@@ -113,7 +114,7 @@
 (defstruct doc
   sdoc     ;doc-section--short documentation
   ldoc     ;doc-section--long documentation
-  type     ;string--the type of this documented entity
+  type     ;(:namespace | :type | :const | :enum)--the type of this documented entity
   requires ;vector of pairs of (type(string), value(string))--the requirements/prerequisites to use this entity
   returns  ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible return values
   throws   ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible thrown values
@@ -162,84 +163,120 @@
 
 (defun doc-push-ref (doc item)
   (setf (doc-refs doc) (push-item item (doc-refs doc))))
-
-
-(defun test-doc ()
-  (let ((d (make-doc)))
-    (format t "1: ~A~%" d)
-
-    (doc-push-sdoc-chunk d (make-doc-chunk "1- md" "1- This is some markdown"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-sdoc-chunk d (make-doc-chunk "2- md" "2- This is some markdown"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-sdoc-chunk d (make-doc-chunk "3- md" "3- This is some markdown"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-ldoc-chunk d (make-doc-chunk "4- md" "4- This is some markdown"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-ldoc-chunk d (make-doc-chunk "5- md" "5- This is some markdown"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-ldoc-chunk d (make-doc-chunk "6- md" "6- This is some markdown"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-require d (make-require "7- dojo-require" "7- bd"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-require d (make-require "8- cpp-include" "8- vector"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-require d (make-require "9- c-include" "9- stdio.h"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-return d (make-rt-item "10- int" "10- some return semantic" "10- some return condition"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-return d (make-rt-item "11- int" "11- some return semantic" "11- some return condition"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-return d (make-rt-item "12- int" "12- some return semantic" "12- some return condition"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-return d (make-rt-item "13- int" "13- some return semantic"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-return d (make-rt-item "14- int"))
-    (format t "1: ~A~%" d)
-
-    (doc-push-return d (make-rt-item "15- int" (make-doc-chunk "15-md" "15- some return semantic") (make-doc-chunk "15-md" "15- some return condition")))
-    (format t "1: ~A~%" d)
-
-    (doc-push-param d (make-param "a" "int" "some parameter named 'a' that's an int"))
-
-
-))
+ 
+(defparameter *pragmas*
+  (let ((pragmas (make-hash-table :test 'equal)))
+    (dolist (word '(:mu :namespace :const :enum :type :n :note :w :warn :r :return :t :throws :c :code :todo :todoc :in :inote))
+      (setf (gethash (string-downcase (string word)) pragmas) word))
+    (setf (gethash "/" pragmas) :escape)
+    pragmas))
 
 (defun compile-text (text)
+; map text into a list of (pragma, <rest-of-line>) pairs
+; nil pragma implies there was no pragma
+; nil <rest-of-line> implies there was nothing after the pragma (if any)
   (map 'list (lambda (s)
-               (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings "//(\\w+)(\\s+\\S.*)?" s)
-                 (if match
-                     (let ((pragma (aref match-strings 0))
-                           (other (aref match-strings 1)))
-                       (if other
-                           (cons pragma (concatenate 'string (make-string (length pragma) :initial-element #\space) other))
-                           (cons pragma nil)))
-                     (cons nil (subseq s 2)))))
+               (setf s (string-right-trim '(#\Space #\Tab) s))
+               (if (eq (length s) 0) 
+                   (cons nil nil)
+                   (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings "\^//(\\w+|/)(\\s+\\S.*)?" s)
+                                        ;notice that the previous regex does not handle (e.g.) "mu(docbook) or #splitpoint
+                     (if match
+                         (let ((pragma (gethash (aref match-strings 0) *pragmas* ))
+                               (other (aref match-strings 1)))
+                           (if (not pragma)
+                               (format t "error--failed to find pragma ~A" (aref match-strings 0)))
+                           (if other
+                               (cons pragma (concatenate 'string (make-string (length pragma) :initial-element #\space) other))
+                               (cons pragma nil)))
+                         (cons nil (if (> (length s) 2) (subseq s 2) nil))))))
        text))
 
 
+
+(defun line-pragma (line)
+  (car (first line)))
+
+(defun line-text (line)
+  (cdr (first line)))
+
+(defun blank-line (line)
+  (let ((line (first line)))
+    (and (not (car line)) (not (cdr line)))))
+
+(defun get-simple-chunk (text doc)
+  ;always append to ldoc of doc
+  (let ((end ;if the next pragma line is an escape, then that line; othewise the first blank line
+         (do ((first-blank-line nil)
+              (p (cdr text) (cdr p)))
+             ((or (not p) (line-pragma p)) 
+              (if (and p (eq (line-pragma p) :escape))
+                  p
+                  first-blank-line))
+           (if (and (not first-blank-line) (blank-line p))
+               (setf first-blank-line p))))
+        (schema (line-pragma text))
+        (s (or (line-text text) "")))
+    (do ((p (cdr text) (cdr p)))
+        ((eq p end) 
+         (doc-push-ldoc-chunk doc (make-doc-chunk schema s))
+         p)
+      (setf s (concatenate 'string s #(#\newline) (or (line-text P) ""))))))
+
+(defun get-return-or-throw-block (text doc)
+  text)
+
+(defun get-inote-block (text doc)
+  text)
+
+(defparameter sdoc-scanner 
+  (cl-ppcre:create-scanner "([^/]+)//(\\s.*)" :multi-line-mode t :single-line-mode t))
+
+(defun extract-sdoc (text doc)
+  (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings sdoc-scanner text)
+    (if match
+        (progn (setf (doc-sdoc doc) (aref match-strings 0))
+               (concatenate 'string (aref match-strings 0) (aref match-strings 1)))
+        text)))
+
+(defun get-long-block (text doc)
+  (let ((schema (line-pragma text))
+        (s (or (line-text text) ""))
+        (check-sdoc (not (doc-sdoc doc))))
+    (do ((p (cdr text) (cdr p)))
+        ((or (not p) (line-pragma p))
+         (if check-sdoc
+             (setf s (extract-sdoc s doc)))
+         (doc-push-ldoc-chunk doc (make-doc-chunk schema s))
+         p)
+      (setf s (concatenate 'string s #(#\newline) (or (line-text p) "")))
+      (if (and check-sdoc (blank-line p))
+          (setf s (extract-sdoc s doc) check-sdoc nil)))))
+
 (defun compile-raw-doc (text)
   (let ((doc (make-doc)))
-    (setf text (compile-text text))
-    (format t "~A~%" text)
-    doc))
+    (do ((text (compile-text text)))
+        ((not text) doc)
+      (format t "compile-raw-doc-line: ~A~%" text)
+      (case (line-pragma text)
+        ((:namespace :type :const :enum) 
+         (setf (doc-type doc) (line-pragma text) text (cdr text)))
+
+        ((:n :note :w :warn :c :code)
+         (setf text (get-simple-chunk text doc)))
+
+        ((:r :returns :t :throws)
+         (setf text (get-return-or-throw-block text doc)))
+
+        ((:todo :todoc :in :inote)
+         (setf text (get-inote-block text doc)))
+        
+        (t
+         (setf text (get-long-block text doc)))))))
 
 (defun create-*-doc (
-  ast ;the ast to document
-  raw-doc ;the raw documentation associated that was attached to a node higher in the tree
+  ast     ;the ast to document
+  raw-doc ;the raw documentation associated with this ast that was attached to a node higher in the tree
 )
   (setf raw-doc (or raw-doc (get-ast-comment ast)))
   (when raw-doc

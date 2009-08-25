@@ -25,7 +25,6 @@
 (defun show-progress (item)
   (format t "~I~A~%" (resource-ctrl-resource item)))
 
-
 (defparameter *current-source* nil)
 
 (defun process-batch (batch)
@@ -87,7 +86,7 @@
               "bd.dijit.staticText"
               "bd.dijit.textbox"
               "bd.dijit.radioGroup"
-(              "bd.dijit.hScrollbar"
+              "bd.dijit.hScrollbar"
               "bd.dijit.checkbox"
               "bd.dijit.combobox"
               "bd.dijit.root"

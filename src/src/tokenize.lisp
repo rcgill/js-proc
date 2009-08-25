@@ -171,7 +171,7 @@
              (loop :for ch := (next)
                 :until (or (eql ch #\newline) (not ch))
                 :do (write-char ch))
-             (write-char #\newline))
+             )
            ))
 
   ;(def skip-line-comment ()
