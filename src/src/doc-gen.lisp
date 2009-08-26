@@ -35,13 +35,56 @@
   //inote  --saa
 |#
 
+(defun make-svector (&optional (first-value nil))
+  (let ((result (make-array 100 :element-type 'string :fill-pointer 0 :adjustable t)))
+    (if first-value
+        (vector-push-extend first-value result))
+    result))
 
 ;;
 ;; The document entity machinery serves to manipulate all of the documentation
 ;; associated with a single document entity which is encapsulated in a "doc" structure.
 ;;
+(defun not-space-p (c)
+  (and (char/= #\space c) (char/= #\tab c)))
+
+(defun trim-chunk (text)
+  ;;text is a vector of strings
+  ;;trim any leading/trailing blank lines
+  ;;trim the maximum but same number of spaces from each line in text, ignoring blank lines
+  ;;join the result with \n and return
+  (let* ((line-count (length text))
+         (start (do ((i 0 (incf i))
+                     (end line-count))
+                    ((or (= i end) (not (equal (aref text i) "")))
+                     i)))
+         (end (do ((i (1- line-count) (decf i)))
+                  ((or (<= i start) (not (equal (aref text i) "")))
+                   i))))
+    ;start/end or the first/last non-blank lines   
+    (if (= start line-count)
+        ""
+        (let ((min-spaces (do ((min-spaces 10000) ;10000 is arbitrary
+                               (i start (incf i)))
+                              ((or (> i end) (= min-spaces 0))
+                               min-spaces)
+                            (let* ((s (aref text i))
+                                   (s-length (length s)))
+                              ;ignore blank lines
+                              (if (> s-length 0)
+                                  (setf min-spaces (min min-spaces (position-if #'not-space-p s))))))))
+          (do* ((i (1+ start) (incf i))
+               (acc (subseq (aref text start) min-spaces)))
+              ((> i end)
+               acc)
+            (let ((s (aref text i)))
+              (setf acc (concatenate 'string acc #(#\newline) 
+                                     (if (> (length s) 0)
+                                         (subseq s min-spaces)
+                                         "")))))))))
+
 (defun make-doc-chunk (schema text)
-  (cons schema text))
+  (cons schema (trim-chunk text)))
 
 (defun doc-chunk-schema (chunk)
   (car chunk))
@@ -171,34 +214,32 @@
     (setf (gethash "/" pragmas) :escape)
     pragmas))
 
-(defun compile-text (text)
+(defun sift-pragmas (text)
 ; map text into a list of (pragma, <rest-of-line>) pairs
 ; nil pragma implies there was no pragma
 ; nil <rest-of-line> implies there was nothing after the pragma (if any)
-  (map 'list (lambda (s)
-               (setf s (string-right-trim '(#\Space #\Tab) s))
-               (if (eq (length s) 0) 
-                   (cons nil nil)
-                   (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings "\^//(\\w+|/)(\\s+\\S.*)?" s)
-                                        ;notice that the previous regex does not handle (e.g.) "mu(docbook) or #splitpoint
-                     (if match
-                         (let ((pragma (gethash (aref match-strings 0) *pragmas* ))
-                               (other (aref match-strings 1)))
-                           (if (not pragma)
-                               (format t "error--failed to find pragma ~A" (aref match-strings 0)))
-                           (if other
-                               (cons pragma (concatenate 'string (make-string (length pragma) :initial-element #\space) other))
-                               (cons pragma nil)))
-                         (cons nil (if (> (length s) 2) (subseq s 2) nil))))))
+; note: currently this routine only handles "//" comments, not /* */ comments.
+  (map 'list 
+       (lambda (s)
+         (setf s (string-right-trim '(#\Space #\Tab) s))
+         (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings "^//(\\w\\S*|/)(\\s+\\S.*)?" s)
+                                        ;notice that the previous regex does not handle (e.g.) #splitpoint
+           (if match
+               (let ((pragma (gethash (aref match-strings 0) *pragmas*))
+                     (other (aref match-strings 1)))
+                 (if (not pragma)
+                     (format t "error--failed to find pragma ~A" (aref match-strings 0)))
+                 (if other
+                     (cons pragma (concatenate 'string (make-string (length (aref match-strings 0)) :initial-element #\space) other))
+                     (cons pragma nil)))
+               (cons nil (if (> (length s) 2) (subseq s 2) nil)))))
        text))
-
-
 
 (defun line-pragma (line)
   (car (first line)))
 
 (defun line-text (line)
-  (cdr (first line)))
+  (or (cdr (first line)) ""))
 
 (defun blank-line (line)
   (let ((line (first line)))
@@ -216,12 +257,13 @@
            (if (and (not first-blank-line) (blank-line p))
                (setf first-blank-line p))))
         (schema (line-pragma text))
-        (s (or (line-text text) "")))
+        (contents (make-svector)))
+    (vector-push-extend (line-text text) contents)
     (do ((p (cdr text) (cdr p)))
         ((eq p end) 
-         (doc-push-ldoc-chunk doc (make-doc-chunk schema s))
+         (doc-push-ldoc-chunk doc (make-doc-chunk schema contents))
          p)
-      (setf s (concatenate 'string s #(#\newline) (or (line-text P) ""))))))
+      (vector-push-extend (line-text p) contents))))
 
 (defun get-return-or-throw-block (text doc)
   text)
@@ -229,37 +271,87 @@
 (defun get-inote-block (text doc)
   text)
 
-(defparameter sdoc-scanner 
-  (cl-ppcre:create-scanner "([^/]+)//(\\s.*)" :multi-line-mode t :single-line-mode t))
 
-(defun extract-sdoc (text doc)
-  (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings sdoc-scanner text)
+
+#|
+
+The short doc is either 
+  1. the first non-specific chunk, or...
+  2. an escaped part of the first non-specific chunk.
+
+In case [1] the chunk is moved completely out of the ldoc and into the sdoc.
+In case [2] the part is copied to the sdoc, but remains in the ldoc.
+
+|#
+
+
+#|
+(defun extract-sdoc (s doc)
+  (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings sdoc-scanner s)
     (if match
         (progn (setf (doc-sdoc doc) (aref match-strings 0))
+               ;cut out the "//"...
                (concatenate 'string (aref match-strings 0) (aref match-strings 1)))
-        text)))
+        (progn (setf (doc-sdoc doc) s) ""))))
 
 (defun get-long-block (text doc)
-  (let ((schema (line-pragma text))
-        (s (or (line-text text) ""))
-        (check-sdoc (not (doc-sdoc doc))))
+  (let* ((schema (line-pragma text))
+        (s (line-text text))
+        (check-sdoc (and (not (doc-sdoc doc)) (not schema))))
     (do ((p (cdr text) (cdr p)))
         ((or (not p) (line-pragma p))
          (if check-sdoc
              (setf s (extract-sdoc s doc)))
-         (doc-push-ldoc-chunk doc (make-doc-chunk schema s))
+         (if (> (length s) 0)
+             (doc-push-ldoc-chunk doc (make-doc-chunk schema s)))
          p)
-      (setf s (concatenate 'string s #(#\newline) (or (line-text p) "")))
       (if (and check-sdoc (blank-line p))
-          (setf s (extract-sdoc s doc) check-sdoc nil)))))
+          (setf s (extract-sdoc s doc) check-sdoc nil))
+      (if (> (length s) 0)
+          (setf s (concatenate 'string s #(#\newline) (line-text p)))
+          (setf s (line-text p))))))
+|#
+
+(defparameter sdoc-scanner 
+  (cl-ppcre:create-scanner "^(.*?)//(.*)$"))
+
+(defun extract-sdoc (contents doc)
+  (do ((i 0 (incf i))
+       (end (length contents)))
+      ((= i end)
+       (setf (doc-sdoc doc) (trim-chunk contents))
+       (make-svector))
+    (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings sdoc-scanner (aref contents i))
+      (if match
+          (let ((sdoc-contents (subseq contents 0 (1+ i))))
+            (setf 
+             (aref sdoc-contents i) (aref match-strings 0)
+             (doc-sdoc doc) (trim-chunk sdoc-contents)
+             (aref contents i) (concatenate 'string (aref match-strings 0) (aref match-strings 1)))
+            (return-from extract-sdoc contents))))))
+
+(defun get-long-block (text doc)
+  (let* ((schema (line-pragma text))
+        (contents (make-svector (line-text text)))
+        (check-sdoc (and (not (doc-sdoc doc)) (not schema))))
+    (do ((p (cdr text) (cdr p)))
+        ((or (not p) (line-pragma p))
+         (if check-sdoc
+             (setf contents (extract-sdoc contents doc)))
+         (doc-push-ldoc-chunk doc (make-doc-chunk schema contents))
+        p)
+      (if (and check-sdoc (blank-line p))
+          (setf contents (extract-sdoc contents doc) check-sdoc nil))
+      (vector-push-extend (line-text p) contents))))
+
 
 (defun compile-raw-doc (text)
   (let ((doc (make-doc)))
-    (do ((text (compile-text text)))
+    (do ((text (sift-pragmas text)))
         ((not text) doc)
-      (format t "compile-raw-doc-line: ~A~%" text)
       (case (line-pragma text)
         ((:namespace :type :const :enum) 
+         (format t "found namespace")
          (setf (doc-type doc) (line-pragma text) text (cdr text)))
 
         ((:n :note :w :warn :c :code)

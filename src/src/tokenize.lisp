@@ -271,7 +271,6 @@
 
       (do ((token (next) (next)))
           ((= i token-count) result)
-        (format t "token number: ~A:(~A)~%" i (token-line token))
         (if (token-type-p token :comment)
             ;aggregate all the comments that are on contiguous lines into one value
             ;if they start on the same or next line as another type of token, then fold into that token
@@ -283,12 +282,10 @@
                    (end-line (token-line token))
                    (comment-count (get-comment-count start-line))
                    (comment (make-array comment-count :element-type 'string :fill-pointer 0)))
-              ;(vector-push (token-value token) comment)
-              (format t "comment count ~A~%" comment-count)
+              (vector-push (token-value token) comment)
               (dotimes (i (1- comment-count))
                 (setf token (next) end-line (token-line token))
                 (vector-push (token-value token) comment))
-              (format t "comment: ~A~%" comment)
               (if (>= (1+ last-non-comment-token-line) start-line) 
                   (setf (token-comment (aref result (1- (fill-pointer result)))) comment)
                   (vector-push (make-token :type :comment :value comment :line start-line :char start-char :newline-before start-newline-before) result)))
