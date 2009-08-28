@@ -1,221 +1,35 @@
 (in-package #:js-proc)
 
-#|
-  Multi-line, multi-chunk pragmas:
-
-  //mu(<...>)    --markup follows; () gives schema
-  //mu(docbook)  --docbook follows
-  //mu(md)       --markdown follows
-  //mu(markdown) --markdown follows
-  ///            --end any previous pragma; return to markdown
-
-  Single-line pragmas:
-
-  //#          --pragma for eval preprocessing
-  //namespace  --object that serves as a namespace
-  //const      --object that servse as a constant
-  //enum       --object than serves as an enumeration
-  //type       --the documented item is a type
-
-  Multi-line, multi-chunk, or single-line pragmas:
-
-  //n      --note section
-  //note   --saa
-  //warn   --warn section
-  //w      --saa
-  //return --a return section
-  //r      --returns (either a return section or a single item in a return section)
-  //throws --throws
-  //t      --throws (either a throws section of a single item in a throw section)
-  //c      --condition in a return/throw section or code otherwise
-  //code   --code
-  //todo   --to do note
-  //todoc  --to document note
-  //in     --implementation note
-  //inote  --saa
-|#
-
 (defun make-svector (&optional (first-value nil))
   (let ((result (make-array 100 :element-type 'string :fill-pointer 0 :adjustable t)))
     (if first-value
         (vector-push-extend first-value result))
     result))
 
-;;
-;; The document entity machinery serves to manipulate all of the documentation
-;; associated with a single document entity which is encapsulated in a "doc" structure.
-;;
-
-(defun not-space-p (c)
-  (and (char/= #\space c) (char/= #\tab c)))
-
-(defun trim-chunk (text)
-  ;;text is a vector of strings
-  ;;trim any leading/trailing blank lines
-  ;;trim the maximum but same number of spaces from each line in text, ignoring blank lines
-  ;;join the result with \n and return
-  (let* ((line-count (length text))
-         (start (do ((i 0 (incf i))
-                     (end line-count))
-                    ((or (= i end) (not (aref text i)))
-                     i)))
-         (end (do ((i (1- line-count) (decf i)))
-                  ((or (<= i start) (not (aref text i)))
-                   i))))
-    ;start/end or the first/last non-blank lines   
-    (if (= start line-count)
-        ""
-        (let ((min-spaces (do ((min-spaces 10000) ;10K is arbitrary (assuming no line is more than 10K chars!)
-                               (i start (incf i)))
-                              ((or (> i end) (zerop min-spaces))
-                               min-spaces)
-                            (let* ((s (aref text i))
-                                   (s-length (length s)))
-                              ;ignore blank lines
-                              (if (> s-length 0)
-                                  (setf min-spaces (min min-spaces (position-if #'not-space-p s))))))))
-          (do* ((i (1+ start) (incf i))
-               (acc (subseq (aref text start) min-spaces)))
-              ((> i end)
-               acc)
-            (let ((s (aref text i)))
-              (setf acc (concatenate 'string acc #(#\newline) 
-                                     (if (> (length s) 0)
-                                         (subseq s min-spaces)
-                                         "")))))))))
-
-(defun make-doc-chunk (schema text)
-  (cons schema (trim-chunk text)))
-
-(defun doc-chunk-schema (chunk)
-  (car chunk))
-
-(defun doc-chunk-text (chunk)
-  (cdr chunk))
-
-(defun section-push-chunk (section chunk)
-  (cond
-    ((eq section nil) 
-     chunk)
-    ((consp section) 
-     (make-array 2 :initial-contents (list section chunk) :element-type 'cons :fill-pointer 2 :adjustable t))
-    (t 
-     (progn (vector-push-extend chunk section) section))))
-
-(defun section-length (section)
-  (cond
-    ((eq section nil) 0)
-    ((consp section) 1) 
-    (t (length section))))
-
-(defun section-get-chunk (section i)
-  (if (consp section)
-      section
-      (aref section i)))
-
-(defun make-require (type value)
-  (cons type value))
-
-(defun require-type (require-item)
-  (car require-item))
-
-(defun require-value (require-item)
-  (cdr require-item))
-
-(defun make-rt-item (type &optional semantics condition)
-  (cons type (cons semantics condition)))
-
-(defun rt-item-type (rt-item)
-  (car rt-item))
-
-(defun rt-item-semantics (rt-item)
-  (car (cdr rt-item)))
-
-(defun rt-item-condition (rt-item)
-  (cdr (cdr rt-item)))
-
-(defun make-param (name &optional type semantics)
-  (cons name (make-array 1 :initial-contents (list (cons type semantics)) :element-type 'cons :fill-pointer 1 :adjustable t)))
-
-(defun param-name (param)
-  (car param))
-
-(defun param-push-ts (param type semantics)
-  (vector-push-extend (cons type semantics) (cdr param)))
-
-(defun param-ts-length (param)
-  (length (cdr param)))
-
-(defun param-ts (param i)
-  (aref (cdr param) i))
-
-(defun param-type (param i)
-  (car (param-ts param i)))
-
-(defun param-semantics (param i)
-  (cdr (param-ts param i)))
-
-(defstruct doc
-  sdoc     ;doc-section--short documentation
-  ldoc     ;doc-section--long documentation
-  type     ;(:namespace | :type | :const | :enum)--the type of this documented entity
-  requires ;vector of pairs of (type(string), value(string))--the requirements/prerequisites to use this entity
-  returns  ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible return values
-  throws   ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible thrown values
-  params   ;vector of parameters--the lambda list for a function
-  errors   ;vector of doc-section--possible error/abnormal conditions
-  supers   ;vector of string--superclasses
-  members  ;hash (name -> doc)--set of member methods/attributes for a class/object
-  refs     ;vector of string--references
-  location ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
-  source   ;resource-ctrl--the resource that sourced this entity
+;
+; take a list of text and sift it into a list sifted lines
+;
+(defstruct sifted-line
+  pragma ;the pragma on the line; nil if none
+  args   ;the pragma arguments on the line; nil if none
+  text   ;anything and everything after the pragma and args
 )
 
-(defun doc-push-sdoc-chunk (doc chunk)
-  (setf (doc-sdoc doc) (section-push-chunk (doc-sdoc doc) chunk)))
-
-(defun doc-push-ldoc-chunk (doc chunk)
-  (setf (doc-ldoc doc) (section-push-chunk (doc-ldoc doc) chunk)))
-
-(defun push-item (item vector)
-  (if vector
-      (progn (vector-push-extend item vector) vector)
-      (make-array 1 :initial-contents (list item) :element-type (type-of item) :fill-pointer 1 :adjustable t)))
-
-(defun doc-push-require (doc item)
-  (setf (doc-requires doc) (push-item item (doc-requires doc))))
-
-(defun doc-push-return (doc item)
-  (setf (doc-returns doc) (push-item item (doc-returns doc))))
-
-(defun doc-push-throws (doc item)
-  (setf (doc-throws doc) (push-item item (doc-throws doc))))
-
-(defun doc-push-param (doc item)
-  (setf (doc-params doc) (push-item item (doc-params doc))))
-
-(defun doc-push-error (doc item)
-  (setf (doc-errors doc) (push-item item (doc-errors doc))))
-
-(defun doc-push-member (doc name member)
-  (let ((members (doc-members doc)))
-    (if members
-        (setf (gethash name members) member)
-        (progn 
-          (setf (doc-members doc) (make-hash-table))
-          (doc-push-member doc name member)))))
-
-(defun doc-push-ref (doc item)
-  (setf (doc-refs doc) (push-item item (doc-refs doc))))
- 
 (defparameter *pragmas*
   (let ((pragmas (make-hash-table :test 'equal)))
-    (dolist (word '(:mu :namespace :const :enum :type :n :note :w :warn :r :return :t :throws :c :code :todo :todoc :in :inote))
+    (dolist (word '(:mu :namespace :const :enum :type :variable :class :function :mfunction :mvariable :mconst :menum :note :warn :return :throws :code :todo :todoc :inote))
       (setf (gethash (string-downcase (string word)) pragmas) word))
+    ;synonms...
+    (setf (gethash "n" pragmas) :note)
+    (setf (gethash "w" pragmas) :warn)
+    (setf (gethash "r" pragmas) :return)
+    (setf (gethash "t" pragmas) :throw)
+    (setf (gethash "c" pragmas) :code)
+    (setf (gethash "in" pragmas) :inote)
+
     (setf (gethash "/" pragmas) :escape)
     (setf (gethash nil pragmas) :ptype) ;a parameter type specifier
     pragmas))
-
 
 (defparameter pragma-scanner 
   ; ^((//)(\\s*`)?|(\\s*`))  start of line followed by "//" or "//<spaces>`" or "<spaces>`"
@@ -228,15 +42,11 @@
   (cl-ppcre:create-scanner "^((//)(\\s*`)?|(\\s*`))([^\\s\\(]+)?(\\([^\\)]*\\))?(\\s+(.*))?"))
   ;                          01   2        3       4            5               6    7
 
-(defparameter cleanup-scanner 
-  (cl-ppcre:create-scanner "^(//)?((\\s*)(\\S)(.*))"))
-  ;                          0    12     3    4
+(defparameter //-comment-scanner 
+  (cl-ppcre:create-scanner "^//"))
 
-(defstruct sifted-line
-  pragma ;the pragma on the line; nil if none
-  args   ;the pragma arguments on the line; nil if none
-  text   ;anything and everything after the pragma and args
-)
+(defparameter non-space-scanner 
+  (cl-ppcre:create-scanner "\\S"))
 
 (defun sift-pragmas (text)
   ; map text to a list of sifted-lines
@@ -259,8 +69,8 @@
                                                            (setf sum (+ sum (length (aref match-strings i))))) :initial-element #\space))))
              (if pragma
                  (make-sifted-line :pragma pragma :args (aref match-strings 5) :text (and rest-of-line (concatenate 'string spaces rest-of-line)))
-                 (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings cleanup-scanner s)
-                   (make-sifted-line :text (and match (string-right-trim '(#\Space #\Tab) (aref match-strings 1)))))))))
+                 (let ((s (cl-ppcre:regex-replace //-comment-scanner s "")))
+                     (make-sifted-line :text (and (cl-ppcre:scan non-space-scanner s) (string-right-trim '(#\Space #\Tab) s))))))))
              text))
  
 (defun line-pragma (line)
@@ -274,6 +84,7 @@
 
 (defun blank-line (line)
   (not (line-text line)))
+
 
 (defun get-simple-chunk (text doc)
   ;always append to ldoc of doc
@@ -301,38 +112,30 @@
 (defun get-inote-block (text doc)
   text)
 
-
-
-#|
-
-The short doc is either 
-  1. the first non-specific chunk, or...
-  2. an escaped part of the first non-specific chunk.
-
-In case [1] the chunk is moved completely out of the ldoc and into the sdoc.
-In case [2] the part is copied to the sdoc, but remains in the ldoc.
-
-|#
-
-
 (defparameter sdoc-scanner 
   ;notice this is non-greedy for the chunk before the //
   (cl-ppcre:create-scanner "^(.*?)//(.*)$"))
   ;                          0      1
 
-(defun extract-sdoc (contents doc)
+(defun extract-sdoc (schema contents doc)
+  ;The short doc is either 
+  ;  1. the first non-specific chunk, or...
+  ;  2. an escaped part of the first non-specific chunk.  
+  ;
+  ;In case [1] the chunk is moved completely out of the ldoc and into the sdoc.
+  ;In case [2] the part is copied to the sdoc, but remains in the ldoc.
   (do ((i 0 (incf i))
        (end (length contents)))
       ((= i end)
-       (setf (doc-sdoc doc) (trim-chunk contents))
+       (doc-push-sdoc-chunk doc (make-doc-chunk schema contents))
        (make-svector))
     (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings sdoc-scanner (aref contents i))
       (if match
           (let ((sdoc-contents (subseq contents 0 (1+ i))))
             (setf 
              (aref sdoc-contents i) (aref match-strings 0)
-             (doc-sdoc doc) (trim-chunk sdoc-contents)
              (aref contents i) (concatenate 'string (aref match-strings 0) (aref match-strings 1)))
+            (doc-push-sdoc-chunk doc (make-doc-chunk schema sdoc-contents))
             (return-from extract-sdoc contents))))))
 
 (defun get-long-block (text doc)
@@ -342,12 +145,12 @@ In case [2] the part is copied to the sdoc, but remains in the ldoc.
     (do ((p (cdr text) (cdr p)))
         ((or (not p) (line-pragma p))
          (if check-sdoc
-             (setf contents (extract-sdoc contents doc)))
+             (setf contents (extract-sdoc schema contents doc)))
          (if (plusp (length contents))
              (doc-push-ldoc-chunk doc (make-doc-chunk schema contents)))
         p)
       (if (and check-sdoc (blank-line p))
-          (setf contents (extract-sdoc contents doc) check-sdoc nil))
+          (setf contents (extract-sdoc schema contents doc) check-sdoc nil))
       (vector-push-extend (line-text p) contents))))
 
 (defun compile-raw-doc (text)
@@ -359,6 +162,9 @@ In case [2] the part is copied to the sdoc, but remains in the ldoc.
          (setf 
           (doc-type doc) (line-pragma text) 
           text (cdr text)))
+
+        (:escape
+         (setf text (cdr text)))
 
         ((:n :note :w :warn :c :code)
          (setf text (get-simple-chunk text doc)))
@@ -538,18 +344,19 @@ In case [2] the part is copied to the sdoc, but remains in the ldoc.
 
   (clrhash *doc-items*)
   (traverse ast)
-  (dump-doc-items)
+  (dump-doc-items *standard-output*)
 )
+#|
 
 ;;for quick testing
-(defun dump-doc-items () 
+(defun dump-doc-itemsx () 
   (maphash (lambda (key value) (format t "~A~%~A~%~%" key value)) 
            *doc-items*))
 
-#|
-(defun dump-doc-item (key value)
-  (xml-emitter:with-xml-output (*standard-output*)
-    (xml-emitter:with-tag ("person" '(("age" "19")))
+
+(defun dump-doc-itemxx (key value)
+  (with-xml-output (*standard-output*)
+    (xml-emitter:with-tag ("person" (list (list "age" (+ 1 19))))
       (xml-emitter:with-simple-tag ("firstName")
         (xml-emitter:xml-out "Peter"))
       (xml-emitter:simple-tag "lastName" "Scott")
@@ -557,9 +364,36 @@ In case [2] the part is copied to the sdoc, but remains in the ldoc.
                                     :school "Iowa State Univeristy"
                                     "mixedCaseTag" "Check out the mixed case!"
                                     "notShown" nil))))
-|#
+
+(defun dump-doc-item0 (k v)
+  (format t "~A~%~A~%~%" k v))
+
+(defun dump-doc-item (k v)
+;  (dump-doc-item0 k v)
+  ;(with-xml-output (*standard-output*)
+    (xml-emitter:with-tag ((doc-type v) (list (list "name" k)))
+      (xml-emitter:simple-tag "sdoc" (doc-sdoc v))
+      )
+   ; )
+  )
 
 
-(defun dump-doc-itemsx ()
+(defun dump-doc-items ()
   (maphash #'dump-doc-item *doc-items*))
 
+(defstruct doc
+  sdoc     ;doc-section--short documentation
+  ldoc     ;doc-section--long documentation
+  type     ;(:namespace | :type | :const | :enum)--the type of this documented entity
+  requires ;vector of pairs of (type(string), value(string))--the requirements/prerequisites to use this entity
+  returns  ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible return values
+  throws   ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible thrown values
+  params   ;vector of parameters--the lambda list for a function
+  errors   ;vector of doc-section--possible error/abnormal conditions
+  supers   ;vector of string--superclasses
+  members  ;hash (name -> doc)--set of member methods/attributes for a class/object
+  refs     ;vector of string--references
+  location ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
+  source   ;resource-ctrl--the resource that sourced this entity
+)
+|#

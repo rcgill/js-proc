@@ -58,9 +58,9 @@
     (setf *current-source* nil)
     resources))
 
-(defun sourcesx ()
+(defun sources ()
   (cons "/usr/home/rcgill/dev/backdraft/src/"
-        (list "bd2"
+        (list "bd"
 #|
               "bd.descriptor.processor"
               "bd.descriptor.cache"
@@ -120,7 +120,7 @@
 |#
               )))
 
-(defun sources ()
+(defun sourcesxx ()
   (cons "/usr/home/rcgill/dev/js-proc/test/js-doc/"
         (list 
          "test01"

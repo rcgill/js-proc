@@ -1,7 +1,7 @@
 (declaim (optimize (speed 0)(space 0)(debug 3)))
 
 (asdf:defsystem #:js-proc
-  :depends-on (#:cl-ppcre)
+  :depends-on (#:cl-ppcre #:xml-emitter)
   :components
   ((:module :src
             :components (
@@ -11,7 +11,8 @@
                          (:file "tokenize" :depends-on ("util"))
                          (:file "parse" :depends-on ("tokenize"))
                          (:file "drivers" :depends-on ("reader" "tokenize" "parse"))
-                         (:file "doc-gen" :depends-on ("parse"))))))
+                         (:file "doc" :depends-on ("package"))
+                         (:file "doc-gen" :depends-on ("parse" "doc"))))))
 
 (asdf:oos 'asdf:load-op :js-proc)
 
