@@ -9,27 +9,58 @@
 ;
 ; take a list of text and sift it into a list sifted lines
 ;
+
+(defparameter *pragma-map*
+  (let ((pragmas (make-hash-table :test 'equal)))
+    (dolist (word '(:mu :md :namespace :const :enum :type :variable :note :warn :code :return :throw :case :result :todo :todoc :inote))
+      (setf (gethash (string-downcase (string word)) pragmas) word))
+    (setf 
+     (gethash "/" pragmas) :end
+
+     ;synonms...
+     (gethash "n" pragmas) :note
+     (gethash "w" pragmas) :warn
+     (gethash "r" pragmas) :return
+     (gethash "t" pragmas) :throw
+     (gethash "c" pragmas) :code
+     (gethash ">" pragmas) :case
+     (gethash "<" pragmas) :result
+     (gethash "in" pragmas) :inote
+     )
+    pragmas))
+
+(defun map-basic-pragmas (pragma args)
+  (declare (ignore args))
+  (let ((pragma (gethash pragma *pragma-map*)))
+    (case pragma
+      ((:mu :md :note :warn :code :todo :todoc :inote :end) pragma)
+      (t nil))))
+
+
+(defun map-object-pragmas (pragma args)
+  (declare (ignore args))
+  (let ((pragma (gethash pragma *pragma-map*)))
+    (case pragma
+      ((:mu :md :note :warn :code :todo :todoc :inote :end :namespace :const :enum :type :variable) pragma)
+      (t nil))))
+
+(defun map-function-pragmas (pragma args)
+  (declare (ignore args))
+  (let ((pragma (gethash pragma *pragma-map*)))
+    (case pragma
+      ((:mu :md :note :warn :code :todo :todoc :inote :end :return :throw :case :result) pragma)
+      (t nil))))
+
+(defun map-parameter-pragmas (pragma args)
+  (if (and (not pragma) args)
+      :paramType
+      (map-basic-pragmas pragma args)))
+
 (defstruct sifted-line
   pragma ;the pragma on the line; nil if none
   args   ;the pragma arguments on the line; nil if none
   text   ;anything and everything after the pragma and args
 )
-
-(defparameter *pragmas*
-  (let ((pragmas (make-hash-table :test 'equal)))
-    (dolist (word '(:mu :namespace :const :enum :type :variable :class :function :mfunction :mvariable :mconst :menum :note :warn :return :throws :code :todo :todoc :inote))
-      (setf (gethash (string-downcase (string word)) pragmas) word))
-    ;synonms...
-    (setf (gethash "n" pragmas) :note)
-    (setf (gethash "w" pragmas) :warn)
-    (setf (gethash "r" pragmas) :return)
-    (setf (gethash "t" pragmas) :throw)
-    (setf (gethash "c" pragmas) :code)
-    (setf (gethash "in" pragmas) :inote)
-
-    (setf (gethash "/" pragmas) :escape)
-    (setf (gethash nil pragmas) :ptype) ;a parameter type specifier
-    pragmas))
 
 (defparameter pragma-scanner 
   ; ^((//)(\\s*`)?|(\\s*`))  start of line followed by "//" or "//<spaces>`" or "<spaces>`"
@@ -48,7 +79,7 @@
 (defparameter non-space-scanner 
   (cl-ppcre:create-scanner "\\S"))
 
-(defun sift-pragmas (text)
+(defun sift-pragmas (text pragma-map)
   ; map text to a list of sifted-lines
   ; nil pragma implies there was no pragma as given by *pragmas*
   ; text is modified by replacing the pragma positions with spaces, right-trimming, and deleting any leading "//"
@@ -56,10 +87,7 @@
   (map 'list 
        (lambda (s)
          (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings pragma-scanner s)
-           (let* ((pragma (and match 
-                              (or (aref match-strings 4) (aref match-strings 5)) ;at least pragma or pragma args must exist to specify a pragma
-                              (gethash (aref match-strings 4) *pragmas*) ;and the specified pragma must be a real pragma
-                              ))
+           (let* ((pragma (and match (funcall pragma-map (aref match-strings 4) (aref match-strings 5))))
                   (rest-of-line (and pragma (aref match-strings 7) (string-right-trim '(#\Space #\Tab) (aref match-strings 6))))
                   (spaces (and rest-of-line (make-string (do ;the sum of the lengths of match-strings 2, 3, 4, 5
                                                           ((sum 0)
@@ -82,151 +110,204 @@
 (defun line-text (line)
   (sifted-line-text (car line)))
 
+(defparameter sdoc-scanner 
+  ;notice this is non-greedy for the chunk before the //
+  (cl-ppcre:create-scanner "(.*?)//(.*)"))
+  ;                         0      1
+
+(defun fixup-sdoc (doc)
+  (if (not (doc-sdoc doc))
+      (let ((candidate (find-if (lambda (chunk) (eq (doc-chunk-schema chunk) :md)) (doc-ldoc doc))))
+        (if candidate
+            (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings sdoc-scanner (doc-chunk-text candidate))
+              (format t "sdoc=~A~%ldoc=~A~%" (doc-sdoc doc) (doc-ldoc doc))
+              (if match
+                  (setf
+                   (doc-sdoc doc) (doc-section-push-chunk (make-doc-chunk :md (aref match-strings 0)))
+                   (doc-chunk-text candidate) (concatenate 'string (aref match-strings 0) (aref match-strings 1)))
+                  (setf
+                   (doc-sdoc doc) (doc-section-push-chunk candidate)
+                   (doc-ldoc doc) (remove candidate (doc-ldoc doc))))
+              (format t "sdoc=~A~%ldoc=~A~%" (doc-sdoc doc) (doc-ldoc doc))
+              (format t "type-of sdoc=~A~%type-of ldoc=~A~%" (type-of (doc-sdoc doc)) (type-of (doc-ldoc doc)))
+)))))
+
+(defun get-doc-chunk (pragma text section)
+  (do ((contents (make-svector (line-text text)) )
+        (p (cdr text) (cdr p)))
+      ((or (not p) (line-pragma p))
+       (vector-push-extend (make-doc-chunk pragma contents) section)
+       p)
+    (vector-push-extend (line-text p) contents)))
+
 (defun blank-line (line)
   (not (line-text line)))
 
-
-(defun get-simple-chunk (text doc)
+(defun get-doc-simple-subsection (pragma text section)
   ;always append to ldoc of doc
-  (let ((end ;if the next pragma line is an escape, then that line; othewise the first blank line
+  (let ((end ;if the next pragma line is an end or eof, then that line; othewise the first blank line
          (do ((first-blank-line nil)
               (p (cdr text) (cdr p)))
              ((or (not p) (line-pragma p)) 
-              (if (and p (eq (line-pragma p) :escape))
+              (if (or (not p) (and p (eq (line-pragma p) :end)))
                   p
                   first-blank-line))
            (if (and (not first-blank-line) (blank-line p))
-               (setf first-blank-line p))))
-        (schema (line-pragma text))
-        (contents (make-svector)))
-    (vector-push-extend (line-text text) contents)
-    (do ((p (cdr text) (cdr p)))
-        ((eq p end) 
-         (doc-push-ldoc-chunk doc (make-doc-chunk schema contents))
+               (setf first-blank-line p)))))
+    (do ((contents (make-svector (line-text text)) )
+         (p (cdr text) (cdr p)))
+        ((eq p end)
+         (vector-push-extend (make-doc-chunk pragma contents) section)
          p)
       (vector-push-extend (line-text p) contents))))
 
-(defun get-return-or-throw-block (text doc)
-  text)
+(defun get-doc-return/throw-subsection (pragma text section)
+  ;TODO
+  (declare (ignore pragma text section))
+)
 
-(defun get-inote-block (text doc)
-  text)
+(defun get-doc-param-type-section (text param)
+  ;text is a sifted list of pragmas; the first pragma should be a :paramType
+  ;process until another :paramType or end is encountered
 
-(defparameter sdoc-scanner 
-  ;notice this is non-greedy for the chunk before the //
-  (cl-ppcre:create-scanner "^(.*?)//(.*)$"))
-  ;                          0      1
+  ;assume the documentation block for a parameter always starts with a :paramType pragma...
+  (if (not (eq (line-pragma text) :paramType))
+      (format t "A parameter documentatino block started with some pragma other than a parameter type; replaced pragma with parameter type.~%~A~%" (line-text text)))
+  (if (not (line-pragma-args text))
+      (format t "A parameter documentatino block started without a type specification; replaced type specification with nil.~%~A~%" (line-text text)))
 
-(defun extract-sdoc (schema contents doc)
-  ;The short doc is either 
-  ;  1. the first non-specific chunk, or...
-  ;  2. an escaped part of the first non-specific chunk.  
-  ;
-  ;In case [1] the chunk is moved completely out of the ldoc and into the sdoc.
-  ;In case [2] the part is copied to the sdoc, but remains in the ldoc.
-  (do ((i 0 (incf i))
-       (end (length contents)))
-      ((= i end)
-       (doc-push-sdoc-chunk doc (make-doc-chunk schema contents))
-       (make-svector))
-    (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings sdoc-scanner (aref contents i))
-      (if match
-          (let ((sdoc-contents (subseq contents 0 (1+ i))))
-            (setf 
-             (aref sdoc-contents i) (aref match-strings 0)
-             (aref contents i) (concatenate 'string (aref match-strings 0) (aref match-strings 1)))
-            (doc-push-sdoc-chunk doc (make-doc-chunk schema sdoc-contents))
-            (return-from extract-sdoc contents))))))
+  (let ((type (line-pragma-args text))
+        (section (make-doc-section)))
+    (do* ((p text (cdr p))
+          (pragma :md (line-pragma p)))
+         ((or (not p) (eq pragma :paramType))
+          (doc-param-push-type param type section)
+          p)
+      (case pragma
+        ((:note :warn :code)
+         (setf p (get-doc-simple-subsection pragma text section)))
 
-(defun get-long-block (text doc)
-  (let* ((schema (line-pragma text))
-        (contents (make-svector (line-text text)))
-        (check-sdoc (and (not (doc-sdoc doc)) (not schema))))
-    (do ((p (cdr text) (cdr p)))
-        ((or (not p) (line-pragma p))
-         (if check-sdoc
-             (setf contents (extract-sdoc schema contents doc)))
-         (if (plusp (length contents))
-             (doc-push-ldoc-chunk doc (make-doc-chunk schema contents)))
-        p)
-      (if (and check-sdoc (blank-line p))
-          (setf contents (extract-sdoc schema contents doc) check-sdoc nil))
-      (vector-push-extend (line-text p) contents))))
+        (:end
+         (setf p (cdr text)))
 
-(defun compile-raw-doc (text)
-  (let ((doc (make-doc)))
-    (do ((text (sift-pragmas text)))
-        ((not text) doc)
-      (case (line-pragma text)
-        ((:namespace :type :const :enum) 
-         (setf 
-          (doc-type doc) (line-pragma text) 
-          text (cdr text)))
-
-        (:escape
-         (setf text (cdr text)))
-
-        ((:n :note :w :warn :c :code)
-         (setf text (get-simple-chunk text doc)))
-
-        ((:r :returns :t :throws)
-         (setf text (get-return-or-throw-block text doc)))
-
-        ((:todo :todoc :in :inote)
-         (setf text (get-inote-block text doc)))
-        
         (t
-         (setf text (get-long-block text doc)))))))
+         (setf p (get-doc-chunk (or pragma :md) text section)))))))
+
+(defun get-doc-param (name raw-doc)
+  (let ((param (make-doc-param name)))
+    (do ((text 
+          (sift-pragmas raw-doc #'map-parameter-pragmas) 
+          (get-doc-param-type-section text param)))
+        ((not text)
+         param))))
+
+(defun get-doc-params (param-list)
+  ;param-list is a list of (name . comment) pairs
+  (let ((params (make-doc-params)))
+    (dolist (p param-list params)
+      (vector-push-extend (get-doc-param (car p) (cdr p)) params))))
+
 
 (defun create-*-doc (
   ast     ;the ast to document
-  raw-doc ;the raw documentation associated with this ast that was attached to a node higher in the tree
+  raw-doc ;the raw documentation associated with ast
 )
-  (setf raw-doc (or raw-doc (get-ast-comment ast)))
-  (when raw-doc
-    (let ((doc (compile-raw-doc raw-doc)))
-      (case (get-ast-type ast)
-        (:function 
-         (create-function-doc ast doc))
-        (:object 
-         (create-object-doc ast doc))
-        (:array 
-         (create-array-doc ast doc))
-        (t 
-         (create-variable-doc ast doc))))))
+  (case (get-ast-type ast)
+    (:function 
+     (create-function-doc ast raw-doc))
+    (:object 
+     (create-object-doc ast raw-doc))
+    (:array 
+     (create-array-doc ast raw-doc))
+    (t
+     (create-variable-doc ast raw-doc))))
 
 (defun create-variable-doc (
-  ast ;an object literal production
-  doc ;the comment that was attached to the assignment operator (= or :)
+  ast ;an expression ast that's not an array, object, or function literal
+  raw-doc ;the raw documentation assocated with ast
 )
-  doc)
+  ;TODO
+  (declare (ignore ast raw-doc))
+)
 
 (defun create-array-doc (
-  ast ;an object literal production
-  doc ;the comment that was attached to the assignment operator (= or :)
+  ast ;ast for an array literal
+  raw-doc ;the raw documentation assocated with ast
 )
-  doc)
+  ;TODO
+  (declare (ignore ast raw-doc))
+)
 
 (defun create-object-doc (
-  ast ;an object literal production
-  doc ;the comment that was attached to the assignment operator (= or :)
+  ast ;ast for an object literal
+  raw-doc ;the raw documentation assocated with ast
 )
-  (setf (doc-members doc) 
-        (delete-if (lambda (item) (cdr item)) 
-                   (mapcar (lambda (member)
-                             (let ((name (first member))
-                                   (raw-doc (second member))
-                                   (rhs (third member)))
-                               (cons name (create-*-doc rhs raw-doc))))
-                           (second ast))))
-  doc)
+  (let ((doc (make-doc)))
+    (do* ((text (sift-pragmas raw-doc #'map-object-pragmas))
+          (pragma (line-pragma text)))
+        ((not text))
+      (case pragma
+        ((:namespace :type :const :enum) 
+         (setf 
+          (doc-type doc) pragma 
+          text (cdr text)))
+
+        ((:note :warn :code)
+         (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+
+        ((:todo :todoc :in :inote)
+         (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
+        
+        (:end
+         (setf text (cdr text)))
+
+        (t
+         (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
+
+    (fixup-sdoc doc)
+
+    (setf (doc-members doc)
+          (let ((members (make-hash-table :test 'equal)))
+            (dolist (member (second ast) members)
+              (let* ((name (first member))
+                     (ast (third member))
+                     (raw-doc (or (second member) (get-ast-comment ast))))
+                (setf (gethash name members) (create-*-doc ast raw-doc))))))
+    doc))
 
 (defun create-function-doc (
-  ast ;an object literal production
-  doc ;the comment that was attached to the assignment operator (= or :)
+  ast ;ast for a function literal
+  raw-doc ;the raw documentation assocated with ast
 )
-  ;params is a list in third of ast
-  doc)
+  (let ((doc (make-doc :type :function)))
+    (do* ((text (sift-pragmas raw-doc #'map-function-pragmas))
+          (pragma (line-pragma text)))
+        ((not text))
+      (case pragma
+        (:return
+         (setf text (get-doc-return/throw-subsection pragma text (doc-get-returns doc))))
+
+        (:throw
+         (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
+
+        ((:note :warn :code)
+         (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+
+        ((:todo :todoc :in :inote)
+         (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
+        
+        (:end
+         (setf text (cdr text)))
+
+        (t
+         (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
+
+    (fixup-sdoc doc)
+
+    ;third of ast is a list of (name . comment) pairs, one for each parameter
+    (if (third ast)
+        (setf (doc-params doc) (get-doc-params (third ast))))
+    doc))
 
 ;;
 ;; These are the special processing functions
@@ -306,12 +387,13 @@
 ;;
 (defun proc-assign (ast)
   (let* ((name (get-ast-name (get-ast-assign-attrib ast :left)))
-         (raw-doc (get-ast-comment ast))
          (rhs (get-ast-assign-attrib ast :right))
-         (doc (create-*-doc rhs raw-doc)))
-    (when (and name doc)
-      (setf (doc-location doc) (get-ast-location ast))
-      (append-doc name doc))))
+         (raw-doc (or (get-ast-comment ast) (get-ast-comment ast)))
+         (doc (and name raw-doc (create-*-doc rhs raw-doc))))
+    (if doc
+        (progn
+          (setf (doc-location doc) (get-ast-location ast))
+          (append-doc name doc)))))
 
 (defun proc-call (ast)
   (let* ((name (get-ast-name (second ast)))
@@ -346,54 +428,3 @@
   (traverse ast)
   (dump-doc-items *standard-output*)
 )
-#|
-
-;;for quick testing
-(defun dump-doc-itemsx () 
-  (maphash (lambda (key value) (format t "~A~%~A~%~%" key value)) 
-           *doc-items*))
-
-
-(defun dump-doc-itemxx (key value)
-  (with-xml-output (*standard-output*)
-    (xml-emitter:with-tag ("person" (list (list "age" (+ 1 19))))
-      (xml-emitter:with-simple-tag ("firstName")
-        (xml-emitter:xml-out "Peter"))
-      (xml-emitter:simple-tag "lastName" "Scott")
-      (xml-emitter:emit-simple-tags :age 17
-                                    :school "Iowa State Univeristy"
-                                    "mixedCaseTag" "Check out the mixed case!"
-                                    "notShown" nil))))
-
-(defun dump-doc-item0 (k v)
-  (format t "~A~%~A~%~%" k v))
-
-(defun dump-doc-item (k v)
-;  (dump-doc-item0 k v)
-  ;(with-xml-output (*standard-output*)
-    (xml-emitter:with-tag ((doc-type v) (list (list "name" k)))
-      (xml-emitter:simple-tag "sdoc" (doc-sdoc v))
-      )
-   ; )
-  )
-
-
-(defun dump-doc-items ()
-  (maphash #'dump-doc-item *doc-items*))
-
-(defstruct doc
-  sdoc     ;doc-section--short documentation
-  ldoc     ;doc-section--long documentation
-  type     ;(:namespace | :type | :const | :enum)--the type of this documented entity
-  requires ;vector of pairs of (type(string), value(string))--the requirements/prerequisites to use this entity
-  returns  ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible return values
-  throws   ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible thrown values
-  params   ;vector of parameters--the lambda list for a function
-  errors   ;vector of doc-section--possible error/abnormal conditions
-  supers   ;vector of string--superclasses
-  members  ;hash (name -> doc)--set of member methods/attributes for a class/object
-  refs     ;vector of string--references
-  location ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
-  source   ;resource-ctrl--the resource that sourced this entity
-)
-|#

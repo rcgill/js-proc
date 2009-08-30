@@ -1,3 +1,39 @@
+
+#|
+  Multi-line, multi-chunk pragmas:
+
+  //mu(<...>)    --markup follows; () gives schema
+  //mu(docbook)  --docbook follows
+  //mu(md)       --markdown follows
+  //mu(markdown) --markdown follows
+  ///            --end any previous pragma; return to markdown
+
+  Single-line pragmas:
+
+  //#          --pragma for eval preprocessing
+  //namespace  --object that serves as a namespace
+  //const      --object that servse as a constant
+  //enum       --object than serves as an enumeration
+  //type       --the documented item is a type
+
+  Multi-line, multi-chunk, or single-line pragmas:
+
+  //n      --note section
+  //note   --saa
+  //warn   --warn section
+  //w      --saa
+  //return --a return section
+  //r      --returns (either a return section or a single item in a return section)
+  //throws --throws
+  //t      --throws (either a throws section of a single item in a throw section)
+  //c      --condition in a return/throw section or code otherwise
+  //code   --code
+  //todo   --to do note
+  //todoc  --to document note
+  //in     --implementation note
+  //inote  --saa
+|#
+
 lexical tokens:
 :num    (value of the number)
 :punc   []{}(),.;:

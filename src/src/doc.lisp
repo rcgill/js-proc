@@ -10,7 +10,7 @@
 (defun trim-chunk (text)
   ;;text is a vector of strings
   ;;trim any leading/trailing blank lines
-  ;;trim the maximum but same number of spaces from each line in text, ignoring blank lines
+  ;;left trim the maximum but same number of spaces from each line in text, ignoring blank lines
   ;;join the result with \n and return
   (let* ((line-count (length text))
          (start (do ((i 0 (incf i))
@@ -45,20 +45,25 @@
 (defun make-doc-chunk (schema text)
   (cons schema (trim-chunk text)))
 
-(defun doc-chunk-schema (chunk)
+(defun doc-chunk-pragma (chunk)
   (car chunk))
 
 (defun doc-chunk-text (chunk)
   (cdr chunk))
 
+(defun (setf doc-chunk-text) (text chunk)
+  (setf (cdr chunk) text))
+
 ;
 ; a doc-section is a vector of zero or more chunks
 ;
-(defun doc-section-push-chunk (section chunk)
-  (if section
-     (progn (vector-push-extend chunk section) section)
-     (make-array 1 :initial-contents (list chunk) :element-type 'cons :fill-pointer 1 :adjustable t)))
+(defun make-doc-section ()
+  (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
 
+(defun doc-section-push-chunk (chunk &optional section)
+  (let ((section (or section (make-doc-section))))
+    (vector-push-extend chunk section)
+    section))
 ;
 ; a require is a (type . value)
 ;
@@ -72,51 +77,31 @@
   (cdr require-item))
 
 ;
-; a rt (return/throw) is a triple (type . (semantics . condition))
-;
-(defun make-rt-item (type &optional semantics condition)
-  (cons type (cons semantics condition)))
-
-(defun rt-item-type (rt-item)
-  (car rt-item))
-
-(defun rt-item-semantics (rt-item)
-  (car (cdr rt-item)))
-
-(defun rt-item-condition (rt-item)
-  (cdr (cdr rt-item)))
+; a rt (return/throw) is a triple (type . (result . condition)); result and condition are doc-sections
+; doc returns / doc throws are vectors of rt
+(defun make-doc-returns()
+  (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
 
 ;
-; a param (lambda list parameter) is a pair (name . types), types is a vector of pairs (type . semantics).
+; a param (function parameter) is a pair (name . types), types is a vector of pairs (type . doc-section), semenatics is a doc-section
+; doc params is vector of param
 ;
-(defun make-param (name &optional type semantics)
-  (cons name (make-array 1 :initial-contents (list (cons type semantics)) :element-type 'cons :fill-pointer 1 :adjustable t)))
+(defun make-doc-params ()
+  (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
 
-(defun param-push-ts (param type semantics)
-  (vector-push-extend (cons type semantics) (cdr param)))
+(defun make-doc-param (name)
+  (cons name (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t)))
 
-(defun param-ts-length (param)
-  (length (cdr param)))
-
-(defun param-name (param)
-  (car param))
-
-(defun param-ts (param i)
-  (aref (cdr param) i))
-
-(defun param-type (param i)
-  (car (param-ts param i)))
-
-(defun param-semantics (param i)
-  (cdr (param-ts param i)))
+(defun doc-param-push-type (param type section)
+  (vector-push-extend (cons type section) (cdr param)))
 
 ;
 ; a doc is holds all the documentation for a single code entity
 ;
 (defstruct doc
+  type     ;(:namespace | :type | :const | :enum | :variable | :function | :class)--the type of this documented entity
   sdoc     ;doc-section--short documentation
   ldoc     ;doc-section--long documentation
-  type     ;(:namespace | :type | :const | :enum | :variable | :function | :class)--the type of this documented entity
   requires ;vector of require items--the requirements/prerequisites to use this entity
   returns  ;vector of rt-item--possible return values
   throws   ;vector of rt-item--possible thrown values
@@ -125,15 +110,25 @@
   supers   ;vector of string--superclasses
   members  ;hash (name -> doc)--set of member methods/attributes for a class/object
   refs     ;vector of string--references
+  inotes   ;vector of pairs of (type . doc-section), type a pragma represented as a symbol
   location ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
   source   ;resource-ctrl--the resource that sourced this entity
 )
 
-(defun doc-push-sdoc-chunk (doc chunk)
-  (setf (doc-sdoc doc) (doc-section-push-chunk (doc-sdoc doc) chunk)))
+(defun doc-get-sdoc (doc)
+  (or (doc-sdoc doc) (setf (doc-sdoc doc) (make-doc-section))))
 
-(defun doc-push-ldoc-chunk (doc chunk)
-  (setf (doc-ldoc doc) (doc-section-push-chunk (doc-ldoc doc) chunk)))
+(defun doc-get-ldoc (doc)
+  (or (doc-ldoc doc) (setf (doc-ldoc doc) (make-doc-section))))
+
+(defun doc-get-inotes (doc)
+  (or (doc-inotes doc) (setf (doc-inotes doc) (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))))
+
+(defun doc-get-returns (doc)
+  (or (doc-returns doc) (setf (doc-returns doc) (make-doc-returns))))
+
+(defun doc-get-throws (doc)
+  (or (doc-returns doc) (setf (doc-returns doc) (make-doc-returns))))
 
 (defun doc-vector-push-item (item vector)
   (if vector
@@ -142,12 +137,6 @@
 
 (defun doc-push-require (doc item)
   (setf (doc-requires doc) (doc-vector-push-item item (doc-requires doc))))
-
-(defun doc-push-return (doc item)
-  (setf (doc-returns doc) (doc-vector-push-item item (doc-returns doc))))
-
-(defun doc-push-throws (doc item)
-  (setf (doc-throws doc) (doc-vector-push-item item (doc-throws doc))))
 
 (defun doc-push-param (doc item)
   (setf (doc-params doc) (doc-vector-push-item item (doc-params doc))))
@@ -167,7 +156,7 @@
   (setf (doc-refs doc) (doc-vector-push-item item (doc-refs doc))))
 
 (defun doc-chunk-tag (chunk)
-  (case (doc-chunk-schema chunk)
+  (case (doc-chunk-pragma chunk)
     (:mu "markup")
     (:note "note")
     (:warn "warn")
@@ -182,7 +171,7 @@
     (map nil #'dump-doc-chunk-to-xml section)))
  
 (defun dump-doc-item-to-xml (name doc)
-  (xml-emitter:with-tag ((doc-type doc) (list (list "name" name)))
+  (xml-emitter:with-tag ((string-downcase (doc-type doc)) (list (list "name" name)))
     (dump-doc-section-to-xml "sdoc" (doc-sdoc doc))
     (dump-doc-section-to-xml "ldoc" (doc-ldoc doc))))
 
