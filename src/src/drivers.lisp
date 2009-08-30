@@ -40,6 +40,8 @@
     (format t "lexing...~%")
     (map nil (lambda (item) (show-progress item) (setf (resource-ctrl-raw-tokens item) (lex (resource-ctrl-text item)))) resources)
 
+    
+
     (format t "folding comments...~%")
     (map nil (lambda (item) (show-progress item) (setf (resource-ctrl-folded-tokens item) (fold-comments (resource-ctrl-raw-tokens item)))) resources)
 
@@ -123,7 +125,7 @@
 (defun sources ()
   (cons "/usr/home/rcgill/dev/js-proc/test/js-doc/"
         (list 
-         "test00"
+         "test07"
          )))
         
 (defun test0 ()

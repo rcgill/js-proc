@@ -1,70 +1,54 @@
 (function() {
 
-ns1=
-  //namespace
-  //   (1)This is a short summary of the namespace ns1.// And here is more explanation
-  //   that will not appear in the short doc, but will appear as part of the first paragraph
-  //   in the long doc along with and preceeded by the short doc.
-  //
-  //   (2)Paragraph 2 of the long documentation.
-  //
-  //n (3)Here is a single-line note on the same line as the pragma
-  //
-  //n (4)Here is a multi-line note on that starts
-  //  on the same line as the pragma.
-  //
-  //n (5)Here is a multi-line, multi-paragraph note that starts
-  //  on the same line as the pragma,
-  //
-  //  Paragraph 2 of (5);
-  //  also multi-line
+o1=
+  {};
+
+o2=
+  // This is the sdoc for o2.
+  {};
+
+o3=
+  // This is the sdoc for o3.
   ///
-  // (6)Normal documentation.
-  //
-  //note
-  //      (7)Here is a single-line note on a different line as the pragma
-  //
-  //note
-  //      (8)Here is a multi-line note on that starts
-  //      on a different line as the pragma.
-  //
-  //note
-  //      (9)Here is a multi-line, multi-paragraph note that starts
-  //      on a different line as the pragma,
-  //
-  //      Paragraph 2 of (9);
-  //      also multi-line
+  // This is the single paragraph in the ldoc for o3.
+  {};
+
+o4=
+  // This is the sdoc for o4.
   ///
+  // This is paragraph1 in the ldoc for o4.
   //
-  //w (10)Here is a single-line note on the same line as the pragma
-  //
-  //w (11)Here is a multi-line note on that starts
-  //  on the same line as the pragma.
-  //
-  //w (12)Here is a multi-line, multi-paragraph note that starts
-  //  on the same line as the pragma,
-  //
-  //  Paragraph 2 of (12);
-  //  also multi-line
+  // This is paragraph2 in the ldoc for o4.
+  {};
+
+o5=
+  // This is the sdoc for o5.
   ///
-  // (13)Normal documentation.
-  //
-  //warn
-  // (14)Here is a single-line note on a different line as the pragma
-  //
-  //warn
-  // (15)Here is a multi-line note on that starts
-  // on a different line as the pragma.
-  //
-  //warn
-  // (16)Here is a multi-line, multi-paragraph note that starts
-  // on a different line as the pragma,
-  //
-  // Paragraph 2 of (16);
-  // also multi-line
+  // This is the single paragraph in the ldoc for o5.
+  // It (o5-ldoc-p1) is a multi-line paragraph.
+  {};
+
+o6=
+  // This is the sdoc for o6.
   ///
-  // (17)Normal documentation.
+  // This is paragraph1 in the ldoc for o6.
+  // It (o6-ldoc-p1) is a multi-line paragraph.
   //
+  // This is paragraph2 in the ldoc for o6.
+  // It (o6-ldoc-p2) is a multi-line paragraph.
+  {};
+
+o7=
+  // This is the sdoc for o7. //The rest of ldoc paragraph 1 for o7.
+  //
+  // Paragraph2 of the ldoc for o7.
+  {};
+
+o8=
+  // This is the sdoc for o8. //The rest of ldoc paragraph 1 for o8.
+  // Which is a multi-line paragraph.
+  //
+  // Paragraph2 of the ldoc for o8.
   {};
 
 })();

@@ -42,8 +42,8 @@
                                          (subseq s min-spaces)
                                          "")))))))))
 
-(defun make-doc-chunk (schema text)
-  (cons schema (trim-chunk text)))
+(defun make-doc-chunk (schema text &optional (trim t))
+  (cons schema (or (and trim (trim-chunk text)) text)))
 
 (defun doc-chunk-pragma (chunk)
   (car chunk))
@@ -160,39 +160,38 @@
     (:mu "markup")
     (:note "note")
     (:warn "warn")
+    (:code "code")
+    (:todo "todo")
+    (:todoc "todoc")
+    (:inote "inote")
     (t "markdown")))
 
 (defun dump-doc-chunk-to-xml (chunk)
   (xml-emitter:with-tag ((doc-chunk-tag chunk))
     (xml-emitter:xml-out (doc-chunk-text chunk) :indent nil)))
 
-(defun dump-doc-section-to-xml (name section)
-  (xml-emitter:with-tag (name)
+(defun dump-doc-section-to-xml (name section &optional attribute-list)
+  (xml-emitter:with-tag (name attribute-list)
     (map nil #'dump-doc-chunk-to-xml section)))
+
+(defun dump-doc-params-to-xml (params)
+  (xml-emitter:with-tag ("params")
+    (map nil (lambda (param) ;param is (name . vector of types)
+               (xml-emitter:with-tag ("param" (list (list "name" (car param))))
+                 (map nil (lambda (type) ;type is (type-value . section)
+                            (dump-doc-section-to-xml "type" (cdr type) (list (list "value" (car type)))))
+                      (cdr param))))
+         params)))
  
 (defun dump-doc-item-to-xml (name doc)
   (xml-emitter:with-tag ((string-downcase (doc-type doc)) (list (list "name" name)))
     (dump-doc-section-to-xml "sdoc" (doc-sdoc doc))
-    (dump-doc-section-to-xml "ldoc" (doc-ldoc doc))))
+    (dump-doc-section-to-xml "ldoc" (doc-ldoc doc))
+    (dump-doc-section-to-xml "inotes" (doc-inotes doc))
+    (if (eq (doc-type doc) :function)
+        (dump-doc-params-to-xml (doc-params doc)))
+))
 
 (defun dump-doc-items (stream)
   (with-xml-output (stream) 
     (maphash #'dump-doc-item-to-xml *doc-items*)))
-
-#|
-(defstruct doc
-  sdoc     ;doc-section--short documentation
-  ldoc     ;doc-section--long documentation
-  type     ;(:namespace | :type | :const | :enum)--the type of this documented entity
-  requires ;vector of pairs of (type(string), value(string))--the requirements/prerequisites to use this entity
-  returns  ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible return values
-  throws   ;vector of triples of (type(string), semantics(doc-section), condition(doc-section))--possible thrown values
-  params   ;vector of parameters--the lambda list for a function
-  errors   ;vector of doc-section--possible error/abnormal conditions
-  supers   ;vector of string--superclasses
-  members  ;hash (name -> doc)--set of member methods/attributes for a class/object
-  refs     ;vector of string--references
-  location ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
-  source   ;resource-ctrl--the resource that sourced this entity
-)
-|#
