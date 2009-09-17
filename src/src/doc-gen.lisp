@@ -117,7 +117,7 @@
 
 (defun fixup-sdoc (doc)
   (if (not (doc-sdoc doc))
-      (let ((candidate (find-if (lambda (chunk) (eq (doc-chunk-schema chunk) :md)) (doc-ldoc doc))))
+      (let ((candidate (find-if (lambda (chunk) (eq (doc-chunk-pragma chunk) :md)) (doc-ldoc doc))))
         (if candidate
             (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings sdoc-scanner (doc-chunk-text candidate))
               (if match
@@ -202,163 +202,74 @@
 
 (defun get-doc-params (param-list)
   ;param-list is a list of (name . comment) pairs
-  (let ((params (make-doc-params)))
-    (dolist (p param-list params)
-      (vector-push-extend (get-doc-param (car p) (cdr p)) params))))
+  (if param-list
+      (let ((params (make-doc-params)))
+        (dolist (p param-list params)
+          (vector-push-extend (get-doc-param (car p) (cdr p)) params)))))
 
-(defun create-*-doc (
-  ast     ;the ast to document
-  raw-doc ;the raw documentation associated with ast
-)
-  (case (get-ast-type ast)
-    (:function 
-     (create-function-doc ast raw-doc))
-    (:object 
-     (create-object-doc ast raw-doc))
-    (:array 
-     (create-array-doc ast raw-doc))
-    (t
-     (create-variable-doc ast raw-doc))))
+(defun create-*-doc (ast type legal-pragmas)
+  (let ((doc (make-doc :type type))
+        (raw-doc (asn-comment ast)))
+    (if raw-doc
+        (do* ((text (sift-pragmas raw-doc legal-pragmas))
+              (pragma (line-pragma text) (line-pragma text)))
+             ((not text))
+          (case pragma
+            ((:namespace :type :const :enum :variable) 
+             (setf 
+              (doc-type doc) pragma 
+              text (cdr text)))
+            
+            ((:note :warn :code)
+             (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+            
+            ((:todo :todoc :inote)
+             (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
 
-(defun create-variable-doc (
-  ast ;an expression ast that's not an array, object, or function literal
-  raw-doc ;the raw documentation assocated with ast
-)
-  (declare (ignore ast))
-  (let ((doc (make-doc :type :variable)))
-    (do* ((text (sift-pragmas raw-doc #'map-object-pragmas))
-          (pragma (line-pragma text) (line-pragma text)))
-        ((not text))
-      (case pragma
-        ((:const :variable) 
-         (setf 
-          (doc-type doc) pragma 
-          text (cdr text)))
+            (:return
+              (setf text (get-doc-return/throw-subsection pragma text (doc-get-returns doc))))
 
-        ((:note :warn :code)
-         (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
-
-        ((:todo :todoc :inote)
-         (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
-        
-        (:end
-         (setf text (cdr text)))
-
-        (t
-         (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
-
-    (fixup-sdoc doc)
+            (:throw
+                (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
+            
+            (:end
+             (setf text (cdr text)))
+            
+            (t
+             (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
+        (fixup-sdoc doc))
     doc))
 
-(defun create-array-doc (
-  ast ;ast for an array literal
-  raw-doc ;the raw documentation assocated with ast
-)
-  (declare (ignore ast))
-  (let ((doc (make-doc :type :variable)))
-    (do* ((text (sift-pragmas raw-doc #'map-object-pragmas))
-          (pragma (line-pragma text) (line-pragma text)))
-        ((not text))
-      (case pragma
-        ((:const :variable) 
-         (setf 
-          (doc-type doc) pragma 
-          text (cdr text)))
+(defun create-array-doc (ast)
+  (create-*-doc ast :variable #'map-object-pragmas))
 
-        ((:note :warn :code)
-         (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+(defun create-object-doc (ast)
+  (create-*-doc ast :variable #'map-object-pragmas))
 
-        ((:todo :todoc :inote)
-         (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
-        
-        (:end
-         (setf text (cdr text)))
-
-        (t
-         (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
-
-    (fixup-sdoc doc)
-
+(defun create-function-doc (ast)
+  (let ((doc (create-*-doc ast :function #'map-function-pragmas)))
+    ;second of ast.children is a list of (name . comment) pairs, one for each parameter
+    (and doc (setf (doc-params doc) (get-doc-params (asn-children ast))))
     doc))
 
-(defun create-object-doc (
-  ast ;ast for an object literal
-  raw-doc ;the raw documentation assocated with ast
+(defun process-resource-comment (
+  raw-doc ;the raw documentation
+  resource ;the resource that contained the raw-doc
 )
-  (let ((doc (make-doc :type :variable)))
-    (do* ((text (sift-pragmas raw-doc #'map-object-pragmas))
-          (pragma (line-pragma text) (line-pragma text)))
-        ((not text))
-      (case pragma
-        ((:namespace :type :const :enum :variable) 
-         (setf 
-          (doc-type doc) pragma 
-          text (cdr text)))
+  (declare (ignore raw-doc resource))
 
-        ((:note :warn :code)
-         (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
-
-        ((:todo :todoc :inote)
-         (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
-        
-        (:end
-         (setf text (cdr text)))
-
-        (t
-         (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
-
-    (fixup-sdoc doc)
-
-    (setf (doc-members doc)
-          (let ((members (make-hash-table :test 'equal)))
-            (dolist (member (second ast) members)
-              (let* ((name (first member))
-                     (ast (third member))
-                     (raw-doc (or (second member) (get-ast-comment ast))))
-                (setf (gethash name members) (create-*-doc ast raw-doc))))))
-    doc))
-
-(defun create-function-doc (
-  ast ;ast for a function literal
-  raw-doc ;the raw documentation assocated with ast
+  ;;TODO
 )
-  (let ((doc (make-doc :type :function)))
-    (do* ((text (sift-pragmas raw-doc #'map-function-pragmas))
-          (pragma (line-pragma text) (line-pragma text)))
-        ((not text))
-      (case pragma
-        (:return
-         (setf text (get-doc-return/throw-subsection pragma text (doc-get-returns doc))))
-
-        (:throw
-         (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
-
-        ((:note :warn :code)
-         (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
-
-        ((:todo :todoc :inote)
-         (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
-        
-        (:end
-         (setf text (cdr text)))
-
-        (t
-         (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
-
-    (fixup-sdoc doc)
-
-    ;third of ast is a list of (name . comment) pairs, one for each parameter
-    (if (third ast)
-        (setf (doc-params doc) (get-doc-params (third ast))))
-    doc))
 
 ;;
 ;; These are the special processing functions
 ;;
+(defun process-dojo-declare (arg-list)
+  arg-list
+)
 #|
-(defun |dojo.declare| (ast)
   (labels ((get-super-list (supers)
-             (if (eq (get-ast-type supers) :array)
+             (if (eq (asn-type supers) :array)
                  (mapcar (lambda (ast) (get-ast-name ast)) (second supers))
                  nil)))
     (let ((args (third ast)))
@@ -374,12 +285,16 @@
                              :supers (get-super-list (second args))
                              :members (object-doc-members members)))
                 (format t "the dojo.declare'd class ~A is undocumented ~%" (cdr (first args)))))))))
+|#
 
-(defun |dojo.mixin| (ast)
+(defun process-dojo-mixin (arg-list)
+  arg-list
+)
+#|
   (when (eq (length (third ast)) 2)
     (let* ((name (get-ast-name (first (third ast))))
            (arg2 (second (third ast)))
-           (members (and (eq (get-ast-type arg2) :object) (create-object-doc arg2 "force-doc" nil))))
+           (members (and (eq (asn-type arg2) :object) (create-object-doc arg2 "force-doc" nil))))
       (when (and name (or (< (length name) 4) (not (equal (subseq name 0 4) "this"))))
         (mapc (lambda (property)
                 (when (nonempty-doc (cdr property))
@@ -387,7 +302,6 @@
                               (cdr property))))
               (object-doc-members members))))))
 |#
-
 
 ;;
 ;; This is the document stack
@@ -403,71 +317,255 @@
 ;;
 ;; These functions decode an ast node
 ;;
-(defun get-ast-type (ast)
-  (node-info-type (car ast)))
-
-(defun get-ast-comment (ast)
-  (node-info-comment (car ast)))
-
-(defun get-ast-location (ast)
-  (node-info-location (car ast)))
-
 (defun get-ast-name (ast)
-  (let ((type (get-ast-type ast)))
-    (cond
-      ((eql type :name) (second ast))
-      ((eql type :dot) (concatenate 'string (get-ast-name (second ast)) "." (third ast)))
-      (t nil))))
+  (case (asn-type ast)
+    (:name
+     (token-value (asn-children ast)))
+    (:dot
+     (concatenate 'string 
+                  (get-ast-name (car (asn-children ast))) 
+                  "." 
+                  (token-value (cdr (asn-children ast)))))
+    (t nil)))
 
-(defun get-ast-assign-attrib (ast attrib)
-  (case attrib
-    (:type (second ast))
-    (:left (third ast))
-    (:right (fourth ast))))
+(defun traverse (resource)
+  (let ((doc-stack nil))
+    (labels ((traverse (ast)
+               (case (asn-type ast)
+                 ((:root :block) 
+                  ;children --> list of statements
+                  (dolist (statement (asn-children ast))
+                    (traverse statement)))
 
-;;
-;; These are the ast node processing functions
-;;
-(defun proc-assign (ast)
-  (let* ((name (get-ast-name (get-ast-assign-attrib ast :left)))
-         (rhs (get-ast-assign-attrib ast :right))
-         (raw-doc (or (get-ast-comment ast) (get-ast-comment rhs)))
-         (doc (and name raw-doc (create-*-doc rhs raw-doc))))
-    (if doc
-        (progn
-          (setf (doc-location doc) (get-ast-location ast))
-          (append-doc name doc)))))
+                 (:comment
+                  ;children --> comment-token
+                  (process-resource-comment (asn-children ast) resource))
 
-(defun proc-call (ast)
-  (let* ((name (get-ast-name (second ast)))
-         (f (and name (find-symbol name))))
-    (when f (funcall f ast)))
-  (traverse (second ast)))
+                 (:label
+                  ;children --> (label . statement)
+                  (traverse (second (asn-children ast))))
+                 
+                 (:switch
+                  ;children --> (switch-expr  . case-list)
+                  (let ((children (asn-children ast)))
+                    (traverse (car children))
+                    (dolist (case-item (cdr children))
+                      (traverse case-item))))
 
-(defparameter *processors*
-  (let ((procs (make-hash-table)))
-    (dolist (node-type '(:assign :call))
-      (setf (gethash node-type procs) (find-symbol (concatenate 'string "PROC-" (symbol-name node-type)))))
-    procs))
+                 (:case
+                  ;children --> expression
+                  (traverse (asn-children ast)))
 
-(defun default-processor (ast)
-  (dolist (node (cdr ast) nil)
-    (traverse node)))
+                 (:default
+                  ;children --> nil
+                  )
 
-(defun lookup-processor (node-type)
-  (or (gethash node-type *processors*) #'default-processor))
+                 (:debugger
+                  ;children --> nil
+                  )
 
-(defun traverse (ast)
-  (if (and ast (listp ast))
-      (if (node-info-p (car ast))
-          (funcall (lookup-processor (get-ast-type ast)) ast)
-          (progn (traverse (car ast)) (traverse (cdr ast)))))) ;ast may not be a proper list
+                 (:do
+                  ;children --> (condition . statment)
+                  (let ((children (asn-children ast)))
+                    (traverse (car children))
+                    (traverse (cdr children))))
 
-(defun generate-docs (ast)
+                 (:return
+                  ;children --> expression
+                   (if (asn-comment ast)
+                       ;todo---push the comment into the current function
+                       nil)
+                   (traverse (asn-children ast)))
+
+                 (:throw
+                  ;children --> throw-expr
+                  (if (asn-comment ast)
+                      ;todo---push the comment into the current function
+                      nil)
+                  (traverse (asn-children ast)))
+
+                 (:var
+                  ;children --> vardefs
+                  ;vardefs is a list of (name . expr)
+                  ;name is a token, expr is an expression or nil
+                  (dolist (def (asn-children ast))
+                    (if (cdr def)
+                        (traverse (cdr def)))))
+
+                 (:while
+                  ;children --> (while-condition . while-statement)
+                  (let ((children (asn-children ast)))
+                    (traverse (car children))
+                    (traverse (cdr children))))
+
+                 (:with
+                  ;children --> (with-expr . with-statement)
+                  (let ((children (asn-children ast)))
+                    (traverse (car children))
+                    (traverse (cdr children))))
+
+                 (:statement
+                  ;children --> expression
+                  (traverse (asn-children ast)))
+
+                 ((:break :continue)
+                  ;children --> name-token
+                  )
+
+                 (:for-in
+                  ;children --> (list var name object statement)
+                  (let ((children (asn-children ast)))
+                    (traverse (third children))
+                    (traverse (fourth children))))
+
+                 (:for
+                  ;children --> (list var init test step statement)
+                  ;init --> (nil | vardefs (see :var, above) | asn (an expression))
+                  ;test, step --> (nil | asn (an expression)
+                  (let* ((children (asn-children ast))
+                         (init (second children))
+                         (test (third children))
+                         (step (fourth children))
+                         (statement (fifth children)))
+                    (if (asn-p init)
+                        (traverse init)
+                        (dolist (def init)
+                          (if (cdr def)
+                              (traverse (cdr def)))))
+                    (and test (traverse test))
+                    (and step (traverse step))
+                    (and statement (traverse statement))))
+
+                 ((:function-def :function-literal)
+                  ;children --> (list name parameter-list body)
+                  ;body --> is a list of statements
+                  (setf (asn-doc ast) (create-function-doc ast))
+                  (push (asn-doc ast) doc-stack)
+                  (dolist (statement (third (asn-children ast)))
+                    (traverse statement))
+                  (pop doc-stack))
+
+                 (:if
+                  ;children --> (list condition then else)
+                  (let* ((children (asn-children ast))
+                         (condition (first children))
+                         (then (second children))
+                         (else (third children)))
+                    (traverse condition)
+                    (traverse then)
+                    (and else (traverse condition))))
+
+                 (:try
+                  ;children --> (list body catch finally)
+                  (let* ((children (asn-children ast))
+                         (body (first children))
+                         (catch (second children))
+                         (finally (third children)))
+                    (dolist (statement body)
+                      (traverse statement))
+                    (and catch (traverse catch))
+                    (and finally (traverse finally))))
+
+                 (:expr-list
+                  ;children --> list of expressions
+                  (dolist (expr (asn-children ast))
+                    (traverse expr)))
+
+                 (:new
+                  ;children --> (new-expr . args)
+                  ;args a list of expressions
+                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas))
+                  (let* ((children (asn-children ast))
+                         (new-expr (car children))
+                         (args (cdr children)))
+                    (traverse new-expr)
+                    (dolist (expr args)
+                      (traverse expr))))
+
+                 ((:unary-prefix :unary-postfix)
+                  ;children --> (cons (token-value op) expr)
+                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas))
+                  (traverse (cdr (asn-children ast))))
+
+                 (:array
+                  ;children --> expr-list
+                  (setf (asn-doc ast) (create-array-doc ast))
+                  (dolist (item (asn-children ast))
+                    (traverse item)))
+
+                 (:object
+                  ;children --> list of (property-name . expression)
+                  (setf (asn-doc ast) (create-object-doc ast))
+                  (let ((members (make-hash-table :test 'equal)))
+                    (dolist (property (asn-children ast))
+                      (let ((name (car property))
+                            (value (cdr property)))
+                        (traverse (cdr property))
+                        (setf (gethash name members) (asn-doc value))))
+                    (setf (doc-members (asn-doc ast)) members)))
+
+                 ((:atom :num :string :regexp :name)
+                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas)))
+
+                 ((:+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=)
+                  ;children --> (cons lhs rhs)
+                  (let* ((children (asn-children ast))
+                         (lhs (car children))
+                         (rhs (cdr children))
+                         (name (get-ast-name lhs)))
+                    (if (asn-comment ast)
+                        (progn 
+                          (if (asn-comment rhs) 
+                              (format t "WARNING: two attempts to document the same item.~%"))
+                          (setf (asn-comment rhs) (asn-comment ast))))
+                    (traverse rhs)
+                    (let ((doc (asn-doc rhs)))
+                      (if (and name doc)
+                          (progn
+                            (setf (doc-location doc) (asn-location ast))
+                            (append-doc name doc))))))
+
+                 (:call
+                  ;children --> (function-expression . args)
+                  ;args --> (expression list)
+                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas))
+                  (let* ((children (asn-children ast))
+                         (lhs (car children))
+                         (rhs (cdr children))
+                         (function-name (get-ast-name lhs)))
+                    (cond
+                      ((equal function-name "dojo.declare")
+                       (process-dojo-declare ast))
+
+                      ((equal function-name "dojo.mixin")
+                       (process-dojo-mixin rhs))
+
+                      (t
+                       (traverse lhs)
+                       (dolist (arg rhs)
+                         (traverse arg))))))
+                 
+                 ((:dot :sub :comma :|\|\|| :&& :|\|| :^ :& :== :=== :!= :!== :< :> :<= :>= :instanceof :>> :<< :>>> :+ :- :* :/ :%)
+                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas)))
+                 
+                 (:conditional
+                  ;children --> (list condition true-expr false-expr)
+                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas))
+                  (let* ((children (asn-children ast))
+                         (condition (first children))
+                         (true-expr (second children))
+                         (false-expr (third children)))
+                    (traverse condition)
+                    (traverse true-expr)
+                    (traverse false-expr)))
+                 )))
+      (traverse (resource-ctrl-ast resource)))))
+
+(defun generate-docs (resource)
   ;;keep the source out of the object for debugging...
   (setf *current-source* nil)
 
   (clrhash *doc-items*)
-  (traverse ast)
+  (traverse resource)
   (dump-doc-items *standard-output*)
 )

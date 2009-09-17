@@ -1,7 +1,7 @@
 (in-package #:js-proc)
 
 ;
-; a doc-chunk is a pair (schema . text)
+; a doc-chunk is a pair (pragma . text)
 ;
 
 (defun not-space-p (c)
@@ -42,8 +42,8 @@
                                          (subseq s min-spaces)
                                          "")))))))))
 
-(defun make-doc-chunk (schema text &optional (trim t))
-  (cons schema (or (and trim (trim-chunk text)) text)))
+(defun make-doc-chunk (pragma text &optional (trim t))
+  (cons pragma (or (and trim (trim-chunk text)) text)))
 
 (defun doc-chunk-pragma (chunk)
   (car chunk))

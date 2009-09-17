@@ -1,6 +1,20 @@
 (in-package #:js-proc)
 
-(defstruct token type value line char newline-before comment)
+(defstruct location
+  start-line
+  start-char
+  end-line
+  end-char
+)
+
+(defstruct token 
+  type 
+  value
+  location
+  newline-before 
+  comment
+)
+
 (defun tokenp (token type value)
   (and (eq (token-type token) type)
        (eql (token-value token) value)))
@@ -72,19 +86,12 @@
                    (member value *keywords-before-expression*))
               (and (eq type :punc)
                    (find value "[{}(,.;:"))))
-    (prog1 (make-token :type type :value value :line *line* :char *char* :newline-before newline-before)
+    (prog1 (make-token 
+            :type type 
+            :value value 
+            :location (make-location :start-line *line* :start-char *char* :end-line line :end-char char)
+            :newline-before newline-before)
       (setf newline-before nil)))
-
-  ;(def peek ()
-  ;  (peek-char nil stream nil))
-
-  ;(def next (&optional eof-error)
-  ;  (let ((ch (read-char stream eof-error)))
-  ;    (when ch
-  ;      (if (eql ch #\newline)
-  ;          (setf line (1+ line) char 0 newline-before t)
-  ;          (incf char)))
-  ;    ch))
 
   (def advance-line ()
     (setf line (1+ line) char 0 newline-before t line-text nil)
@@ -143,6 +150,7 @@
                     (incf num (* digit (expt 16 pos)))
                     (js-parse-error "Invalid hex-character pattern in string.")))
           :finally (return num)))
+
   (def read-escaped-char ()
     (let ((ch (next t)))
       (case ch
@@ -151,6 +159,7 @@
         (#\x (code-char (hex-bytes 2)))
         (#\u (code-char (hex-bytes 4)))
         (t ch))))
+
   (def read-string ()
     (let ((quote (next)))
       (handler-case
@@ -171,20 +180,18 @@
              (loop :for ch := (next)
                 :until (or (eql ch #\newline) (not ch))
                 :do (write-char ch))
-             )
-           ))
+             )))
 
-  ;(def skip-line-comment ()
-  ;  (next)
-  ;  (loop :for ch := (next)
-  ;        :until (or (eql ch #\newline) (not ch))))
-
-  (def skip-multiline-comment ()
+  (def read-multiline-comment ()
     (next)
-    (loop :with star := nil
-          :for ch := (next)
-          :until (or (not ch) (and star (eql ch #\/)))
-          :do (setf star (eql ch #\*))))
+    (token :block-comment
+           (with-output-to-string (*standard-output*)
+             (write-string "/*")
+             (loop :with star := nil
+                :for ch := (next)
+                :until (or (not ch) (and star (eql ch #\/)))
+                :do (write-char ch)
+                :do (setf star (eql ch #\*))))))
 
   (def read-regexp ()
     (handler-case
@@ -215,11 +222,8 @@
   (def handle-slash ()
     (next)
     (case (peek)
-      ;(#\/ (skip-line-comment)
-      ;     (next-token))
       (#\/ (read-line-comment))
-      (#\* (skip-multiline-comment)
-           (next-token))
+      (#\* (read-multiline-comment))
       (t (if regex-allowed
              (read-regexp)
              (read-operator "/")))))
@@ -274,19 +278,27 @@
         (if (token-type-p token :comment)
             ;aggregate all the comments that are on contiguous lines into one value
             ;if they start on the same or next line as another type of token, then fold into that token
-            ;otherwise, if they end on the same or previous line of another token type, then fold into that token (NOTE: currently commented out)
             ;otherwise, make them their own token
+            ;note: currently, block-comments are not considered
             (let* ((start-line (token-line token))
                    (start-char (token-char token))
                    (start-newline-before (token-newline-before token)) ;this appears to be useless, but we carry it just in case is becomes useful
                    (end-line (token-line token))
+                   (end-char (token-end-char token))
                    (comment-count (get-comment-count start-line))
                    (comment (make-array comment-count :element-type 'string :fill-pointer 0)))
               (vector-push (token-value token) comment)
               (dotimes (i (1- comment-count))
-                (setf token (next) end-line (token-line token))
+                (setf 
+                 token (next) 
+                 end-line (token-line token)
+                 end-char (token-end-char token))
                 (vector-push (token-value token) comment))
               (if (>= (1+ last-non-comment-token-line) start-line) 
                   (setf (token-comment (aref result (1- (fill-pointer result)))) comment)
-                  (vector-push (make-token :type :comment :value comment :line start-line :char start-char :newline-before start-newline-before) result)))
+                  (vector-push (make-token 
+                                :type :comment 
+                                :value comment 
+                                :location (make-location :line start-line :char start-char :end-line end-line :end-char end-char)
+                                :newline-before start-newline-before) result)))
             (progn (setf last-non-comment-token-line (token-line token)) (vector-push token result)))))))

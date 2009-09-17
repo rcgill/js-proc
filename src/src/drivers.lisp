@@ -2,10 +2,12 @@
 (in-package #:js-proc)
 
 (defun parse-js-string (string &optional strict-semicolons)
+  (declare (ignore string))
   ;; TODO--reimplement with new readers
 )
 
 (defun parse-filename (filename &optional strict-semicolons)
+  (declare (ignore filename))
   ;; TODO--reimplement with new readers
 )
 
@@ -14,9 +16,9 @@
   path
   filename
   text
-  (raw-tokens nil)
-  (folded-tokens nil)
-  (ast nil)
+  raw-tokens
+  folded-tokens
+  ast
 )
 
 (defun get-resource-filename (path resource)
@@ -40,8 +42,6 @@
     (format t "lexing...~%")
     (map nil (lambda (item) (show-progress item) (setf (resource-ctrl-raw-tokens item) (lex (resource-ctrl-text item)))) resources)
 
-    
-
     (format t "folding comments...~%")
     (map nil (lambda (item) (show-progress item) (setf (resource-ctrl-folded-tokens item) (fold-comments (resource-ctrl-raw-tokens item)))) resources)
 
@@ -60,7 +60,7 @@
     (setf *current-source* nil)
     resources))
 
-(defun sourcesx ()
+(defun sources ()
   (cons "/usr/home/rcgill/dev/backdraft/src/"
         (list "bd"
 #|
@@ -122,10 +122,10 @@
 |#
               )))
 
-(defun sources ()
+(defun sourcesx ()
   (cons "/usr/home/rcgill/dev/js-proc/test/js-doc/"
         (list 
-         "test07"
+         "test08"
          )))
         
 (defun test0 ()
