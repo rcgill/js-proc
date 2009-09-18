@@ -22,6 +22,10 @@
   (eq (token-type token) type))
 (defun token-id (token)
   (token-value token))
+(defun token-line (token)
+  (location-start-line (token-location token)))
+(defun token-char (token)
+  (location-start-char (token-location token)))
 
 (defvar *line*)
 (defvar *char*)
@@ -284,7 +288,7 @@
                    (start-char (token-char token))
                    (start-newline-before (token-newline-before token)) ;this appears to be useless, but we carry it just in case is becomes useful
                    (end-line (token-line token))
-                   (end-char (token-end-char token))
+                   (end-char (location-end-char (token-location token)))
                    (comment-count (get-comment-count start-line))
                    (comment (make-array comment-count :element-type 'string :fill-pointer 0)))
               (vector-push (token-value token) comment)
@@ -292,13 +296,13 @@
                 (setf 
                  token (next) 
                  end-line (token-line token)
-                 end-char (token-end-char token))
+                 end-char (location-end-char (token-location token)))
                 (vector-push (token-value token) comment))
               (if (>= (1+ last-non-comment-token-line) start-line) 
                   (setf (token-comment (aref result (1- (fill-pointer result)))) comment)
                   (vector-push (make-token 
                                 :type :comment 
                                 :value comment 
-                                :location (make-location :line start-line :char start-char :end-line end-line :end-char end-char)
+                                :location (make-location :start-line start-line :start-char start-char :end-line end-line :end-char end-char)
                                 :newline-before start-newline-before) result)))
             (progn (setf last-non-comment-token-line (token-line token)) (vector-push token result)))))))

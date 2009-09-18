@@ -14,9 +14,8 @@
 
 (defparameter *assignment*
   (let ((assign (make-hash-table)))
-    (dolist (op '(:+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=))
-      (setf (gethash op assign) (intern (subseq (string op) 0 (1- (length (string op)))) :keyword)))
-    (setf (gethash := assign) t)
+    (dolist (op '(:= :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=))
+      (setf (gethash op assign) t))
     assign))
 
 (defun assignment-p (token)
@@ -110,12 +109,12 @@
     (t src)))
 
 (defun sum-locations (start-location end-location)
-  (let ((start-location (get-location start-location))
-        (end-location (get-location end-location)))
-    (make-location :start-line (location-start-line start-location)
-                   :start-char (location-start-char start-location)
-                   :end-line (location-end-line end-location)
-                   :end-char (location-end-char end-location))))
+  (let ((start (get-location start-location))
+        (end (get-location end-location)))
+    (make-location :start-line (location-start-line start)
+                   :start-char (location-start-char start)
+                   :end-line (location-end-line end)
+                   :end-char (location-end-char end))))
 
 (defun as-comment (comment-token)
   (make-asn 
@@ -227,8 +226,8 @@
   (make-asn
    :type (if statement :function-def :function-literal)
    :location (sum-locations function-token right-brace)
-   :comment comment)
-  :children (list name parameter-list body))
+   :comment comment
+   :children (list name parameter-list body)))
 
 (defun as-if (if-token condition body else)
   (make-asn
@@ -292,11 +291,11 @@
 
 (defun as-binary-op (lhs op rhs &optional location)
   (make-asn
-   :type (token-value op) ;one of... 
+   :type (or (and (symbolp op) op) (token-value op)) ;one of... 
      ; :dot :sub :call :comma
      ; :\\ :&& :\ :^ :& :== :=== :!= :!== :< :> :<= :>= :in :instanceof :>> :<< :>>> :+ :- :* :/ :%
      ; :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :\= :^=
-   :comment (token-comment op)
+   :comment (and (token-p op) (token-comment op))
    :location (or location (sum-locations lhs rhs))
    :children (cons lhs rhs)))
 
@@ -309,7 +308,7 @@
 (defun as-root (statements)
   (make-asn
    :type :root
-   :location (sum-locations (car statements) (last statements))
+   :location (sum-locations (car statements) (car (last statements)))
    :children statements))
 
 (defun maybe-before-semicolon (func)
@@ -498,8 +497,8 @@
   ;  x= function(...){...} 
   ;  someFunction(x, function(...){...}, ...)
   (let (name parameter-list comment body)
-    (setf name (and (token-type-p token :name) token))
-    (next)
+    (if (token-type-p token :name)
+        (setf name (get-token-and-advance))) 
     (if (and statement (not name)) 
         (unexpected token))
     (expect #\()
@@ -543,7 +542,8 @@
   (let ((opening (expect #\())
         (expr (expression))
         (closing (expect #\))))
-    (setf (asn-location (car expr)) (sum-locations opening closing))))
+    (setf (asn-location expr) (sum-locations opening closing))
+    expr))
 
 (defun array* ()
   (let ((opening (expect #\[))
@@ -673,10 +673,7 @@
 (defun expression (&optional (commas t))
   (let ((expr (maybe-assign)))
     (if (and commas (tokenp token :punc #\,))
-        (progn
-          (setf (token-type token) :operator
-                (token-value token) :comma)
-          (as-binary-op expr (get-token-and-advance) (expression)))
+        (as-binary-op expr (get-token-and-advance) (expression))
         expr)))
 
 (defun parse-js (token-source)

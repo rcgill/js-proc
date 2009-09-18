@@ -192,6 +192,6 @@
         (dump-doc-params-to-xml (doc-params doc)))
 ))
 
-(defun dump-doc-items (stream)
+(defun dump-doc-items (stream doc-items)
   (with-xml-output (stream) 
-    (maphash #'dump-doc-item-to-xml *doc-items*)))
+    (maphash #'dump-doc-item-to-xml doc-items)))

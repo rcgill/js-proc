@@ -27,7 +27,16 @@
 (defun show-progress (item)
   (format t "~I~A~%" (resource-ctrl-resource item)))
 
-(defparameter *current-source* nil)
+;;
+;; This is the document stack
+;;
+(defparameter *doc-items*
+  (make-hash-table :test 'equal))
+
+(defun append-doc (key item)
+  (if (gethash key *doc-items*)
+      (format t "ERROR: multiple doc items for ~A~%." key)
+      (setf (gethash key *doc-items*) item)))
 
 (defun process-batch (batch)
   (let ((resources (make-array 100 :element-type 'resource-ctrl :fill-pointer 0))
@@ -51,13 +60,13 @@
     (format t "traversing...~%")
     (map nil (lambda (item) 
                (show-progress item) 
-               (setf *current-source* item)
-               (generate-docs (resource-ctrl-ast item)))
+               (doc-gen item #'append-doc))
          resources)
+
+    (dump-doc-items *standard-output* *doc-items*)
 
     (format t "done...~%")
 
-    (setf *current-source* nil)
     resources))
 
 (defun sources ()

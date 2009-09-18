@@ -185,10 +185,8 @@
       (case pragma
         ((:note :warn :code)
          (setf p (get-doc-simple-subsection pragma p section)))
-
         (:end
          (setf p (cdr p)))
-
         (t
          (setf p (get-doc-chunk (or pragma :md) p section)))))))
 
@@ -211,33 +209,34 @@
   (let ((doc (make-doc :type type))
         (raw-doc (asn-comment ast)))
     (if raw-doc
-        (do* ((text (sift-pragmas raw-doc legal-pragmas))
-              (pragma (line-pragma text) (line-pragma text)))
-             ((not text))
-          (case pragma
-            ((:namespace :type :const :enum :variable) 
-             (setf 
-              (doc-type doc) pragma 
-              text (cdr text)))
-            
-            ((:note :warn :code)
-             (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
-            
-            ((:todo :todoc :inote)
-             (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
-
-            (:return
-              (setf text (get-doc-return/throw-subsection pragma text (doc-get-returns doc))))
-
-            (:throw
-                (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
-            
-            (:end
-             (setf text (cdr text)))
-            
-            (t
-             (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
-        (fixup-sdoc doc))
+        (progn
+          (do* ((text (sift-pragmas raw-doc legal-pragmas))
+                (pragma (line-pragma text) (line-pragma text)))
+               ((not text))
+            (case pragma
+              ((:namespace :type :const :enum :variable) 
+               (setf 
+                (doc-type doc) pragma 
+                text (cdr text)))
+              
+              ((:note :warn :code)
+               (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+              
+              ((:todo :todoc :inote)
+               (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
+              
+              (:return
+                (setf text (get-doc-return/throw-subsection pragma text (doc-get-returns doc))))
+              
+              (:throw
+                  (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
+              
+              (:end
+               (setf text (cdr text)))
+              
+              (t
+               (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
+          (fixup-sdoc doc)))
     doc))
 
 (defun create-array-doc (ast)
@@ -249,7 +248,7 @@
 (defun create-function-doc (ast)
   (let ((doc (create-*-doc ast :function #'map-function-pragmas)))
     ;second of ast.children is a list of (name . comment) pairs, one for each parameter
-    (and doc (setf (doc-params doc) (get-doc-params (asn-children ast))))
+    (and doc (setf (doc-params doc) (get-doc-params (second (asn-children ast)))))
     doc))
 
 (defun process-resource-comment (
@@ -304,17 +303,6 @@
 |#
 
 ;;
-;; This is the document stack
-;;
-(defparameter *doc-items*
-  (make-hash-table :test 'equal))
-
-(defun append-doc (key item)
-  (if (gethash key *doc-items*)
-      (format t "ERROR: multiple doc items for ~A~%." key)
-      (setf (gethash key *doc-items*) item)))
-
-;;
 ;; These functions decode an ast node
 ;;
 (defun get-ast-name (ast)
@@ -328,7 +316,7 @@
                   (token-value (cdr (asn-children ast)))))
     (t nil)))
 
-(defun traverse (resource)
+(defun doc-gen (resource append-doc-item)
   (let ((doc-stack nil))
     (labels ((traverse (ast)
                (case (asn-type ast)
@@ -386,11 +374,10 @@
 
                  (:var
                   ;children --> vardefs
-                  ;vardefs is a list of (name . expr)
+                  ;vardefs is a list of lexical-var
                   ;name is a token, expr is an expression or nil
                   (dolist (def (asn-children ast))
-                    (if (cdr def)
-                        (traverse (cdr def)))))
+                    (and (lexical-var-init-val def) (traverse (lexical-var-init-val def)))))
 
                  (:while
                   ;children --> (while-condition . while-statement)
@@ -507,7 +494,7 @@
                  ((:atom :num :string :regexp :name)
                   (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas)))
 
-                 ((:+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=)
+                 ((:= :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=)
                   ;children --> (cons lhs rhs)
                   (let* ((children (asn-children ast))
                          (lhs (car children))
@@ -523,7 +510,7 @@
                       (if (and name doc)
                           (progn
                             (setf (doc-location doc) (asn-location ast))
-                            (append-doc name doc))))))
+                            (funcall append-doc-item name doc))))))
 
                  (:call
                   ;children --> (function-expression . args)
@@ -560,12 +547,3 @@
                     (traverse false-expr)))
                  )))
       (traverse (resource-ctrl-ast resource)))))
-
-(defun generate-docs (resource)
-  ;;keep the source out of the object for debugging...
-  (setf *current-source* nil)
-
-  (clrhash *doc-items*)
-  (traverse resource)
-  (dump-doc-items *standard-output*)
-)
