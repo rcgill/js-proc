@@ -12,10 +12,11 @@
 
 (defparameter *pragma-map*
   (let ((pragmas (make-hash-table :test 'equal)))
-    (dolist (word '(:mu :md :namespace :const :enum :type :variable :note :warn :code :return :throw :case :result :todo :todoc :inote))
+    (dolist (word '(:mu :md :namespace :const :enum :type :variable :kwargs :hash :note :warn :code :return :throw :case :result :todo :todoc :inote :file))
       (setf (gethash (string-downcase (string word)) pragmas) word))
     (setf 
      (gethash "/" pragmas) :end
+     (gethash "*" pragmas) :endParamType
 
      ;synonms...
      (gethash "n" pragmas) :note
@@ -29,20 +30,13 @@
      )
     pragmas))
 
-(defun map-basic-pragmas (pragma args)
-  (declare (ignore args))
-  (let ((pragma (gethash pragma *pragma-map*)))
-    (case pragma
-      ((:mu :md :note :warn :code :todo :todoc :inote :end) pragma)
-      (t nil))))
-
-
 (defun map-object-pragmas (pragma args)
-  (declare (ignore args))
-  (let ((pragma (gethash pragma *pragma-map*)))
-    (case pragma
-      ((:mu :md :note :warn :code :todo :todoc :inote :end :namespace :const :enum :type :variable) pragma)
-      (t nil))))
+  (if (and (not pragma) args)
+      :paramType
+      (let ((pragma (gethash pragma *pragma-map*)))
+        (case pragma
+          ((:mu :md :note :warn :code :todo :todoc :inote :end :endParamType :namespace :const :enum :type :variable :kwargs :hash) pragma)
+          (t nil)))))
 
 (defun map-function-pragmas (pragma args)
   (declare (ignore args))
@@ -52,9 +46,20 @@
       (t nil))))
 
 (defun map-parameter-pragmas (pragma args)
-  (if (and (not pragma) args)
+  (if (or (eq pragma :result) (and (not pragma) args))
       :paramType
-      (map-basic-pragmas pragma args)))
+      (let ((pragma (gethash pragma *pragma-map*)))
+        (case pragma
+          ((:mu :md :note :warn :code :todo :todoc :inote :end :endParamType) pragma)
+          (t nil)))))
+
+(defun map-comment-pragmas (pragma args)
+  (declare (ignore args))
+  (let ((pragma (gethash pragma *pragma-map*)))
+    (case pragma
+      ((:file :mu :md :note :warn :code :todo :todoc :inote :end) pragma)
+      (t nil))))
+  
 
 (defstruct sifted-line
   pragma ;the pragma on the line; nil if none
@@ -165,23 +170,15 @@
   (declare (ignore pragma text section))
 )
 
-(defun get-doc-param-type-section (text param)
+(defun get-doc-param-type-section (text)
   ;text is a sifted list of pragmas; the first pragma should be a :paramType
-  ;process until another :paramType or end is encountered
-
-  ;assume the documentation block for a parameter always starts with a :paramType pragma...
-  (if (not (eq (line-pragma text) :paramType))
-      (format t "ERROR: A parameter documentation block started with some pragma other than a parameter type; replaced pragma with parameter type pragma.~%~A~%" (line-text text)))
-  (if (not (line-pragma-args text))
-      (format t "ERROR: A parameter documentation block started without a type specification; replaced type specification with \"()\".~%~A~%" (line-text text)))
-
+  ;process until another :paramType, :endParamType, or end is encountered
   (let ((type (line-pragma-args text))
         (section (make-doc-section)))
     (do* ((p text)
           (pragma :md (line-pragma p)))
-         ((or (not p) (eq pragma :paramType))
-          (doc-param-push-type param type section)
-          p)
+         ((or (not p) (eq pragma :paramType) (eq pragma :endParamType))
+          (values type section p))
       (case pragma
         ((:note :warn :code)
          (setf p (get-doc-simple-subsection pragma p section)))
@@ -191,12 +188,28 @@
          (setf p (get-doc-chunk (or pragma :md) p section)))))))
 
 (defun get-doc-param (name raw-doc)
-  (let ((param (make-doc-param name)))
-    (do ((text 
-          (sift-pragmas raw-doc #'map-parameter-pragmas) 
-          (get-doc-param-type-section text param)))
-        ((not text)
-         param))))
+  (let ((param (make-doc-param name))
+        (general-section (make-doc-section)))
+    (do* ((text (sift-pragmas raw-doc #'map-parameter-pragmas))
+         (pragma (line-pragma text) (line-pragma text)))
+        ((not text) 
+         (if (plusp (length general-section))
+             (doc-param-push-type param nil general-section))
+         param)
+      (case pragma
+        (:paramType
+         (multiple-value-bind (type section next) (get-doc-param-type-section text)
+                           (doc-param-push-type param type section)
+                           (setf text next)))
+
+        ((:note :warn :code :todo :todoc :inote)
+         (setf text (get-doc-simple-subsection pragma text general-section)))
+
+        ((:end :endParamType)
+         (setf text (cdr text)))
+                 
+        (t
+         (setf text (get-doc-chunk (or pragma :md) text general-section)))))))
 
 (defun get-doc-params (param-list)
   ;param-list is a list of (name . comment) pairs
@@ -219,8 +232,17 @@
                 (doc-type doc) pragma 
                 text (cdr text)))
               
+              ((:kwargs :hash)
+               (push pragma (doc-flags doc))
+               (setf text (cdr text)))
+              
               ((:note :warn :code)
                (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+
+              (:paramType ;for a object property
+               (multiple-value-bind (type section next) (get-doc-param-type-section text)
+                                 (doc-types-push-type doc type section)
+                                 (setf text next)))
               
               ((:todo :todoc :inote)
                (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
@@ -231,7 +253,7 @@
               (:throw
                   (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
               
-              (:end
+              ((:end :endParamType)
                (setf text (cdr text)))
               
               (t
@@ -251,21 +273,49 @@
     (and doc (setf (doc-params doc) (get-doc-params (second (asn-children ast)))))
     doc))
 
-(defun process-resource-comment (
+(defun process-return (ast current-doc)
+  (do ((text (sift-pragmas (asn-comment ast) #'map-parameter-pragmas)))
+      ((not text))
+    (multiple-value-bind 
+      (type section next) (get-doc-param-type-section text)
+      (doc-push-return current-doc type section)
+      (setf text next))))
+
+(defun process-comment-island (
   raw-doc ;the raw documentation
   resource ;the resource that contained the raw-doc
+  current-doc-item ;the current documentable item being processed
 )
-  (declare (ignore raw-doc resource))
-
-  ;;TODO
-)
+  (let ((text (sift-pragmas (token-value raw-doc) #'map-comment-pragmas))
+        doc)
+    (if (eq (line-pragma text) :file)
+        (setf doc (resource-doc resource)
+              (sifted-line-pragma (car text)) :md)
+        (setf doc current-doc-item))
+    (do ((pragma (line-pragma text) (line-pragma text)))
+       ((not text))
+      (case pragma
+        ((:note :warn :code)
+         (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+        
+        ((:todo :todoc :inote)
+         (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
+        
+        (:end
+         (setf text (cdr text)))
+        
+        (t
+         (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
+    (fixup-sdoc doc)))
 
 ;;
 ;; These are the special processing functions
 ;;
 (defun process-dojo-declare (arg-list)
-  arg-list
-)
+  (let ((class-name (first arg-list))
+        (supers (second arg-list))
+        (members (third arg-list)))
+    (format t "~A~%~A~%" class-name supers)))
 #|
   (labels ((get-super-list (supers)
              (if (eq (asn-type supers) :array)
@@ -302,6 +352,31 @@
               (object-doc-members members))))))
 |#
 
+(defun process-dojo-provide (args resource)
+  ;args is the list of argument expressions sent to dojo.provide
+  ;we only pay attention if it a :string asn
+  (if (eq (asn-type (first args)) :string)
+      (let ((doc (resource-doc resource)))
+        (push (token-value (asn-children (first args))) (doc-provides doc)))))
+
+(defun process-dojo-require (args resource)
+  ;args is the list of argument expressions sent to dojo.require
+  ;we only pay attention if it a :string asn
+  (if (eq (asn-type (first args)) :string)
+      (let ((doc (resource-doc resource)))
+        (push (token-value (asn-children (first args))) (doc-requires doc)))))
+
+(defun process-bd-typedef (args append-doc-item)
+  ;args is the list of argument expressions sent to bd.typedef; 
+  ;first of args should be an asn with type :string
+  ;second of args should be an object
+  (let ((base (token-value (asn-children (first args)))))
+    (dolist (item (asn-children (second args)))
+      ;item is a cons (name . ast)
+      (let ((doc (asn-doc (cdr item))))
+        (setf (doc-type doc) :type)
+        (funcall append-doc-item (concatenate 'string base "." (token-value (car item))) doc)))))
+
 ;;
 ;; These functions decode an ast node
 ;;
@@ -316,8 +391,9 @@
                   (token-value (cdr (asn-children ast)))))
     (t nil)))
 
-(defun doc-gen (resource append-doc-item)
-  (let ((doc-stack nil))
+(defun doc-gen (resource append-doc-item get-doc-item)
+  (setf (resource-doc resource) (funcall get-doc-item (resource-name resource) :resource t))
+  (let ((doc-stack (list (resource-doc resource))))
     (labels ((traverse (ast)
                (case (asn-type ast)
                  ((:root :block) 
@@ -327,7 +403,7 @@
 
                  (:comment
                   ;children --> comment-token
-                  (process-resource-comment (asn-children ast) resource))
+                  (process-comment-island (asn-children ast) resource (first doc-stack)))
 
                  (:label
                   ;children --> (label . statement)
@@ -361,8 +437,7 @@
                  (:return
                   ;children --> expression
                    (if (asn-comment ast)
-                       ;todo---push the comment into the current function
-                       nil)
+                       (process-return ast (first doc-stack)))
                    (traverse (asn-children ast)))
 
                  (:throw
@@ -485,7 +560,7 @@
                   (setf (asn-doc ast) (create-object-doc ast))
                   (let ((members (make-hash-table :test 'equal)))
                     (dolist (property (asn-children ast))
-                      (let ((name (car property))
+                      (let ((name (token-value (car property)))
                             (value (cdr property)))
                         (traverse (cdr property))
                         (setf (gethash name members) (asn-doc value))))
@@ -517,20 +592,29 @@
                   ;args --> (expression list)
                   (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas))
                   (let* ((children (asn-children ast))
-                         (lhs (car children))
-                         (rhs (cdr children))
-                         (function-name (get-ast-name lhs)))
+                         (func-expr (car children))
+                         (args (cdr children))
+                         (function-name (get-ast-name func-expr)))
+                    (traverse func-expr)
+                    (dolist (arg args)
+                      (traverse arg))
                     (cond
                       ((equal function-name "dojo.declare")
-                       (process-dojo-declare ast))
+                       (process-dojo-declare args))
 
                       ((equal function-name "dojo.mixin")
-                       (process-dojo-mixin rhs))
+                       (process-dojo-mixin args))
 
-                      (t
-                       (traverse lhs)
-                       (dolist (arg rhs)
-                         (traverse arg))))))
+                      ((equal function-name "dojo.provide")
+                       (process-dojo-provide args resource))
+
+                      ((equal function-name "dojo.require")
+                       (process-dojo-require args resource))
+
+                      ((equal function-name "bd.typedef")
+                       (process-bd-typedef args append-doc-item))
+
+                      )))
                  
                  ((:dot :sub :comma :|\|\|| :&& :|\|| :^ :& :== :=== :!= :!== :< :> :<= :>= :instanceof :>> :<< :>>> :+ :- :* :/ :%)
                   (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas)))
@@ -546,4 +630,4 @@
                     (traverse true-expr)
                     (traverse false-expr)))
                  )))
-      (traverse (resource-ctrl-ast resource)))))
+      (traverse (resource-ast resource)))))

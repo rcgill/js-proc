@@ -56,6 +56,7 @@
   (prog1 (aref tokens token-index) (incf token-index)))
 
 (defun get-next-token (&optional (comment-ok nil))
+  (setf comment-ok t)
   (do ((token (advance) (advance)))
       ((or (not (token-type-p token :comment)) comment-ok)
        token)))
@@ -442,10 +443,9 @@
 
 (defun break/cont (break/cont-token)
   (unless *in-loop* (error* "'~a' not inside a loop or switch." (token-value break/cont-token)))
-  (next)
   (let ((name (and (token-type-p token :name) token)))
     (when name (next))
-    (unless (member (token-value name) label-stack :test #'string=)
+    (unless (or (not name) (member (token-value name) label-stack :test #'string=))
       (error* "Labeled '~a' without matching loop or switch statement." (token-value break/cont-token)))
     (as-break/cont break/cont-token name (semicolon))))
 

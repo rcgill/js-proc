@@ -95,24 +95,43 @@
 (defun doc-param-push-type (param type section)
   (vector-push-extend (cons type section) (cdr param)))
 
+(defun doc-types-push-type (doc type section)
+  (if (doc-types doc)
+      (vector-push-extend (cons type section) (doc-types doc))
+      (progn
+        (setf (doc-types doc) (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
+        (doc-types-push-type doc type section))))
+
+(defun doc-push-return (doc type section)
+  (if (doc-returns doc)
+      (vector-push-extend (cons type section) (doc-returns doc))
+      (progn
+        (setf (doc-returns doc) (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
+        (doc-push-return doc type section)))
+  (format t "in doc-push-return ~A~%" (doc-returns doc))
+)
+      
 ;
 ; a doc is holds all the documentation for a single code entity
 ;
 (defstruct doc
-  type     ;(:namespace | :type | :const | :enum | :variable | :function | :class)--the type of this documented entity
+  type     ;(:namespace | :type | :const | :enum | :variable | :function | :class | :resource)--the type of this documented entity
+  flags    ;list of keywords
   sdoc     ;doc-section--short documentation
   ldoc     ;doc-section--long documentation
   requires ;vector of require items--the requirements/prerequisites to use this entity
-  returns  ;vector of rt-item--possible return values
+  provides ;vector of provided items
+  returns  ;vector of vector of (type . doc-section)
   throws   ;vector of rt-item--possible thrown values
   params   ;vector of param--the lambda list for a function
+  types    ;vector of types--vector of (type . section)
   errors   ;vector of doc-section--possible error/abnormal conditions
   supers   ;vector of string--superclasses
   members  ;hash (name -> doc)--set of member methods/attributes for a class/object
   refs     ;vector of string--references
-  inotes   ;vector of pairs of (type . doc-section), type a pragma represented as a symbol
+  inotes   ;doc-section--implementation notes
   location ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
-  source   ;resource-ctrl--the resource that sourced this entity
+  source   ;resource--the resource that sourced this entity
 )
 
 (defun doc-get-sdoc (doc)
@@ -122,7 +141,7 @@
   (or (doc-ldoc doc) (setf (doc-ldoc doc) (make-doc-section))))
 
 (defun doc-get-inotes (doc)
-  (or (doc-inotes doc) (setf (doc-inotes doc) (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))))
+  (or (doc-inotes doc) (setf (doc-inotes doc) (make-doc-section))))
 
 (defun doc-get-returns (doc)
   (or (doc-returns doc) (setf (doc-returns doc) (make-doc-returns))))
@@ -171,27 +190,80 @@
     (xml-emitter:xml-out (doc-chunk-text chunk) :indent nil)))
 
 (defun dump-doc-section-to-xml (name section &optional attribute-list)
-  (xml-emitter:with-tag (name attribute-list)
-    (map nil #'dump-doc-chunk-to-xml section)))
+  (if (and section (plusp (length section)))
+      (xml-emitter:with-tag (name attribute-list)
+        (map nil #'dump-doc-chunk-to-xml section))))
 
 (defun dump-doc-params-to-xml (params)
-  (xml-emitter:with-tag ("params")
-    (map nil (lambda (param) ;param is (name . vector of types)
-               (xml-emitter:with-tag ("param" (list (list "name" (car param))))
-                 (map nil (lambda (type) ;type is (type-value . section)
-                            (dump-doc-section-to-xml "type" (cdr type) (list (list "value" (car type)))))
-                      (cdr param))))
-         params)))
+  (if (and params (plusp (length params)))
+      (xml-emitter:with-tag ("params")
+        (map nil (lambda (param) ;param is (name . vector of types)
+                   (xml-emitter:with-tag ("param" (list (cons "name" (car param))))
+                     (map nil (lambda (type) ;type is (type-value . section)
+                                (dump-doc-section-to-xml "type" (cdr type) (list (cons "value" (car type)))))
+                          (cdr param))))
+             params))))
+
+(defun dump-doc-types-to-xml (types)
+  (if types
+      (xml-emitter:with-tag ("types")
+        (map nil (lambda (type) ;type is (type-value . section)
+                   (dump-doc-section-to-xml "type" (cdr type) (list (cons "value" (car type)))))
+             types))))
+
+(defun dump-doc-returns-to-xml (returns)
+  (if returns
+      (xml-emitter:with-tag ("returns")
+        (map nil (lambda (return) ;return is (type-value . section)
+                   (dump-doc-section-to-xml "return" (cdr return) (list (cons "value" (car return)))))
+             returns))))
+
+(defun dump-doc-provides-to-xml (provides)
+  (if provides
+      (progn
+        (xml-emitter:with-tag ("provides")
+          (dolist (item provides)
+            (xml-emitter:with-simple-tag ("provide" (list (cons "name" item)))))))))
  
+(defun dump-doc-requires-to-xml (provides)
+  (if provides
+      (progn
+        (xml-emitter:with-tag ("requires")
+          (dolist (item provides)
+            (xml-emitter:with-simple-tag ("require" (list (cons "name" item)))))))))
+
+(defun dump-doc-props-to-xml (members)
+  (if (and members (plusp (hash-table-count members)))
+      (xml-emitter:with-tag ("properties")
+        (maphash #'dump-doc-item-to-xml members))))
+
+(defun get-flags (flags)
+  (if flags
+      (mapcar (lambda (flag) (cons (string-downcase flag) "T")) flags)
+      nil))
+
 (defun dump-doc-item-to-xml (name doc)
-  (xml-emitter:with-tag ((string-downcase (doc-type doc)) (list (list "name" name)))
+  (xml-emitter:with-tag ((string-downcase (doc-type doc)) (cons (cons "name" (or (and (consp name) (car name)) name)) (get-flags (doc-flags doc))))
     (dump-doc-section-to-xml "sdoc" (doc-sdoc doc))
     (dump-doc-section-to-xml "ldoc" (doc-ldoc doc))
     (dump-doc-section-to-xml "inotes" (doc-inotes doc))
-    (if (eq (doc-type doc) :function)
-        (dump-doc-params-to-xml (doc-params doc)))
-))
+    
+    (dump-doc-props-to-xml (doc-members doc))
+    (dump-doc-types-to-xml (doc-types doc))
+    (dump-doc-returns-to-xml (doc-returns doc))
+    (case (doc-type doc)
+      (:function
+       (dump-doc-params-to-xml (doc-params doc)))
+      
+      (:resource
+       (dump-doc-provides-to-xml (doc-provides doc))
+       (dump-doc-requires-to-xml (doc-requires doc)))
+
+      ))
+)
 
 (defun dump-doc-items (stream doc-items)
   (with-xml-output (stream) 
     (maphash #'dump-doc-item-to-xml doc-items)))
+
+

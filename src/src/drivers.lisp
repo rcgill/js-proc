@@ -11,21 +11,22 @@
   ;; TODO--reimplement with new readers
 )
 
-(defstruct resource-ctrl
-  resource
+(defstruct resource
+  name
   path
   filename
   text
   raw-tokens
   folded-tokens
   ast
+  doc
 )
 
-(defun get-resource-filename (path resource)
-  (concatenate 'string path (cl-ppcre:regex-replace-all "\\." resource "/") ".js"))
+(defun get-resource-filename (path name)
+  (concatenate 'string path (cl-ppcre:regex-replace-all "\\." name "/") ".js"))
 
 (defun show-progress (item)
-  (format t "~I~A~%" (resource-ctrl-resource item)))
+  (format t "~I~A~%" (resource-name item)))
 
 ;;
 ;; This is the document stack
@@ -33,34 +34,46 @@
 (defparameter *doc-items*
   (make-hash-table :test 'equal))
 
-(defun append-doc (key item)
-  (if (gethash key *doc-items*)
-      (format t "ERROR: multiple doc items for ~A~%." key)
-      (setf (gethash key *doc-items*) item)))
+(defun make-doc-key (name type)
+  (cons name type))
+
+(defun append-doc (name item)
+  (let ((key (make-doc-key name (doc-type item))))
+    (if (gethash key *doc-items*)
+        (format t "ERROR: multiple doc items for ~A~%." key)
+        (setf (gethash key *doc-items*) item))))
+
+(defun get-doc (name type &optional (create-p nil))
+  (let* ((key (make-doc-key name  type))
+         (item (gethash key *doc-items*)))
+    (if item
+        item
+        (if create-p
+            (setf (gethash key *doc-items*) (make-doc :type type))))))
 
 (defun process-batch (batch)
-  (let ((resources (make-array 100 :element-type 'resource-ctrl :fill-pointer 0))
+  (let ((resources (make-array 100 :element-type 'resource :fill-pointer 0))
         (path (car batch)))
 
     (format t "reading...~%")
-    (dolist (resource (cdr batch))
-      (let ((filename (get-resource-filename path resource)))
-        (format t "~I~A~%" resource)
-        (vector-push (make-resource-ctrl :resource resource :filename filename :text (read-source-filename filename)) resources)))
+    (dolist (name (cdr batch))
+      (let ((filename (get-resource-filename path name)))
+        (format t "~I~A~%" name)
+        (vector-push (make-resource :name name :filename filename :text (read-source-filename filename)) resources)))
 
     (format t "lexing...~%")
-    (map nil (lambda (item) (show-progress item) (setf (resource-ctrl-raw-tokens item) (lex (resource-ctrl-text item)))) resources)
+    (map nil (lambda (item) (show-progress item) (setf (resource-raw-tokens item) (lex (resource-text item)))) resources)
 
     (format t "folding comments...~%")
-    (map nil (lambda (item) (show-progress item) (setf (resource-ctrl-folded-tokens item) (fold-comments (resource-ctrl-raw-tokens item)))) resources)
+    (map nil (lambda (item) (show-progress item) (setf (resource-folded-tokens item) (fold-comments (resource-raw-tokens item)))) resources)
 
     (format t "parsing...~%")
-    (map nil (lambda (item) (show-progress item) (setf (resource-ctrl-ast item) (parse-js (resource-ctrl-folded-tokens item)))) resources)
+    (map nil (lambda (item) (show-progress item) (setf (resource-ast item) (parse-js (resource-folded-tokens item)))) resources)
 
     (format t "traversing...~%")
     (map nil (lambda (item) 
                (show-progress item) 
-               (doc-gen item #'append-doc))
+               (doc-gen item #'append-doc #'get-doc))
          resources)
 
     (dump-doc-items *standard-output* *doc-items*)
@@ -113,7 +126,7 @@
               "bd.dijit.button"
               "bd.dijit.verticalSlider"
               "bd.dijit.horizontalSlider"
-              "bd.dijit.mixin.core"
+1              "bd.dijit.mixin.core"
               "bd.dijit.mixin.container"
               "bd.dijit.mixin.navigator"
               "bd.dijit.menu"
