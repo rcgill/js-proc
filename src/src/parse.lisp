@@ -53,21 +53,16 @@
 (defvar label-stack)
 
 (defun advance ()
+  ;warning: a comment island is only allowed where a statement is legal
   (prog1 (aref tokens token-index) (incf token-index)))
 
-(defun get-next-token (&optional (comment-ok nil))
-  (setf comment-ok t)
-  (do ((token (advance) (advance)))
-      ((or (not (token-type-p token :comment)) comment-ok)
-       token)))
-
 (defun peek ()
-  (or peeked (setf peeked (get-next-token))))
+  (or peeked (setf peeked (advance))))
 
-(defun next (&optional (comment-ok nil))
+(defun next ()
   (if peeked
       (setf token peeked peeked nil)
-      (setf token (get-next-token comment-ok)))
+      (setf token (advance)))
   token)
 
 (defun skip (n)
@@ -86,20 +81,20 @@
 (defun unexpected (token)
   (token-error token "Unexpected token '~a'." (token-id token)))
 
-(defun expect-token (type val &optional (comment-ok nil))
+(defun expect-token (type val)
   (if (tokenp token type val)
-      (prog1 token (next comment-ok))
+      (prog1 token (next))
       (error* "Unexpected token '~a', expected '~a'." (token-id token) val)))
 
-(defun expect (punc &optional (comment-ok nil))
-  (expect-token :punc punc comment-ok))
+(defun expect (punc)
+  (expect-token :punc punc))
 
 (defun expect-key (keyword)
   (expect-token :keyword keyword))
 
 (defun semicolon ()
-  (cond (strict-semicolons (expect #\; t))
-        ((tokenp token :punc #\;) (prog1 token (next t)))
+  (cond (strict-semicolons (expect #\;))
+        ((tokenp token :punc #\;) (prog1 token (next)))
         ((token-newline-before token) nil)
         (t (unexpected token))))
 
@@ -328,7 +323,7 @@
         comment)
     (when (tokenp token :operator :=)
       (setf comment (token-comment (get-token-and-advance))
-            init-val (expression)))
+            init-val (expression nil)))
     (if (tokenp token :punc #\,)
         (progn 
           (setf comment (or (token-comment (get-token-and-advance)) comment))
@@ -681,7 +676,7 @@
         tokens token-source
         token-index 0
         peeked nil
-        token (get-next-token t))
+        token (advance))
   (as-root (loop 
               :until (token-type-p token :eof)
               :collect (statement))))

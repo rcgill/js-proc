@@ -108,7 +108,6 @@
       (progn
         (setf (doc-returns doc) (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
         (doc-push-return doc type section)))
-  (format t "in doc-push-return ~A~%" (doc-returns doc))
 )
       
 ;
@@ -168,7 +167,7 @@
     (if members
         (setf (gethash name members) member)
         (progn 
-          (setf (doc-members doc) (make-hash-table))
+          (setf (doc-members doc) (make-hash-table :test 'equal))
           (doc-push-member doc name member)))))
 
 (defun doc-push-ref (doc item)
@@ -237,6 +236,12 @@
       (xml-emitter:with-tag ("properties")
         (maphash #'dump-doc-item-to-xml members))))
 
+(defun dump-doc-supers-to-xml (supers)
+  (if supers
+      (xml-emitter:with-tag ("supers")
+        (dolist (item supers)
+          (xml-emitter:with-simple-tag ("super" (list (cons "name" item))))))))
+
 (defun get-flags (flags)
   (if flags
       (mapcar (lambda (flag) (cons (string-downcase flag) "T")) flags)
@@ -258,6 +263,9 @@
       (:resource
        (dump-doc-provides-to-xml (doc-provides doc))
        (dump-doc-requires-to-xml (doc-requires doc)))
+
+      (:class
+       (dump-doc-supers-to-xml (doc-supers doc)))
 
       ))
 )
