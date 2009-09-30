@@ -549,16 +549,15 @@
                   (create-doc ast))
 
                  ((:= :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=)
-                  ;children --> (cons lhs rhs)
+                  ;children --> (lhs . rhs)
+                  (if (asn-comment ast)
+                      ;the comment is really documenting the lhs
+                      (setf (asn-comment lhs) (asn-comment ast)
+                            (asn-comment ast) nil))
                   (let* ((children (asn-children ast))
                          (lhs (car children))
                          (rhs (cdr children))
                          (name (get-ast-name lhs)))
-                    (if (asn-comment ast)
-                        (progn 
-                          (if (asn-comment rhs) 
-                              (format t "WARNING: two attempts to document the same item.~%"))
-                          (setf (asn-comment rhs) (asn-comment ast))))
                     (traverse rhs)
                     (let ((doc (asn-doc rhs)))
                       (if (and name doc)
