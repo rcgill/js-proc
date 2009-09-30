@@ -38,14 +38,6 @@
           ((:mu :md :note :warn :code :todo :todoc :inote :end :endParamType :namespace :const :enum :type :variable :kwargs :hash :nosource) pragma)
           (t nil)))))
 
-(defun map-class-pragmas (pragma args)
-  (if (and (not pragma) args)
-      :paramType
-      (let ((pragma (gethash pragma *pragma-map*)))
-        (case pragma
-          ((:mu :md :note :warn :code :todo :todoc :inote :end) pragma)
-          (t nil)))))
-
 (defun map-function-pragmas (pragma args)
   (declare (ignore args))
   (let ((pragma (gethash pragma *pragma-map*)))
@@ -226,11 +218,10 @@
         (dolist (p param-list params)
           (vector-push-extend (get-doc-param (car p) (cdr p)) params)))))
 
-(defun create-*-doc (ast type legal-pragmas)
-  (let ((doc (make-doc :type type))
-        (raw-doc (asn-comment ast)))
-    (if raw-doc
-        (progn
+(defun create-*-doc (ast type legal-pragmas &optional (force nil))
+  (let ((raw-doc (asn-comment ast)))
+    (if (or raw-doc force)
+        (let ((doc (make-doc :type type)))
           (do* ((text (sift-pragmas raw-doc legal-pragmas))
                 (pragma (line-pragma text) (line-pragma text)))
                ((not text))
@@ -266,20 +257,18 @@
               
               (t
                (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
-          (fixup-sdoc doc)))
-    doc))
+          (fixup-sdoc doc)
+          (setf (asn-doc ast) doc)))))
 
-(defun create-array-doc (ast)
-  (create-*-doc ast :variable #'map-object-pragmas))
-
-(defun create-object-doc (ast)
-  (create-*-doc ast :variable #'map-object-pragmas))
+(defun create-doc (ast &optional (force nil))
+  (create-*-doc ast :variable #'map-object-pragmas force))
 
 (defun create-function-doc (ast)
-  (let ((doc (create-*-doc ast :function #'map-function-pragmas)))
-    ;second of ast.children is a list of (name . comment) pairs, one for each parameter
-    (and doc (setf (doc-params doc) (get-doc-params (second (asn-children ast)))))
-    doc))
+  ;always create function docs because parameters may be defined or the body may contain return/throws
+  ;in spite of the fact that no function definition exists
+  (create-*-doc ast :function #'map-function-pragmas t)
+  (setf (doc-params (asn-doc ast)) (get-doc-params (second (asn-children ast))))
+  (asn-doc ast))
 
 (defun process-return (ast current-doc)
   (do ((text (sift-pragmas (asn-comment ast) #'map-parameter-pragmas)))
@@ -319,24 +308,28 @@
 ;;
 ;; These are the special processing functions
 ;;
+
 (defun process-dojo-declare (arg-list)
   (let ((class-name (token-value (asn-children (first arg-list))))
         (supers (second arg-list))
         (doc (asn-doc (third arg-list))))
-    (setf (doc-type doc) :class)
+    (setf 
+     (doc-type doc) :class
+     (doc-members doc) (doc-properties doc)
+     (doc-properties doc) nil)
     (if (eq (asn-type supers) :array)
         (setf (doc-supers doc) (mapcar #'get-ast-name (asn-children supers))))
     (values class-name doc)))
 
 (defun process-dojo-mixin (arg-list get-doc-item)
   (let* ((name (get-ast-name (first arg-list)))
-         (src (and (eq (asn-type (second arg-list)) :object) (doc-members (asn-doc (second arg-list)))))
+         (src (and (eq (asn-type (second arg-list)) :object) (doc-properties (asn-doc (second arg-list)))))
          (dest (and src (or 
                 (funcall get-doc-item name :namespace)
                 (funcall get-doc-item name :variable)
                 (funcall get-doc-item name :function)))))
     (if dest
-        (maphash (lambda (name value)  (doc-push-member dest name value)) src))))
+        (maphash (lambda (name value)  (doc-push-property dest name value)) src))))
 
 (defun process-dojo-provide (args resource)
   ;args is the list of argument expressions sent to dojo.provide
@@ -521,38 +514,39 @@
                   (dolist (expr (asn-children ast))
                     (traverse expr)))
 
+
+
                  (:new
                   ;children --> (new-expr . args)
                   ;args an expr-list asn
-                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas))
+                  (create-doc ast)
                   (let* ((children (asn-children ast)))
                     (traverse (car children))
                     (traverse (cdr children))))
 
                  ((:unary-prefix :unary-postfix)
                   ;children --> (cons (token-value op) expr)
-                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas))
+                  (create-doc ast)
                   (traverse (cdr (asn-children ast))))
 
                  (:array
                   ;children --> expr-list
-                  (setf (asn-doc ast) (create-array-doc ast))
+                  (create-doc ast)
                   (dolist (item (asn-children ast))
                     (traverse item)))
 
                  (:object
                   ;children --> list of (property-name . expression)
-                  (setf (asn-doc ast) (create-object-doc ast))
-                  (let ((members (make-hash-table :test 'equal)))
+                  ;always create a doc since this may be an object literal used in dojo.mixin or dojo.declare
+                  (let ((doc (create-doc ast t)))
                     (dolist (property (asn-children ast))
                       (let ((name (token-value (car property)))
                             (value (cdr property)))
-                        (traverse (cdr property))
-                        (setf (gethash name members) (asn-doc value))))
-                    (setf (doc-members (asn-doc ast)) members)))
+                        (traverse value)
+                        (doc-push-property doc name value)))))
 
                  ((:atom :num :string :regexp :name)
-                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas)))
+                  (create-doc ast))
 
                  ((:= :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=)
                   ;children --> (cons lhs rhs)
@@ -575,7 +569,7 @@
                  (:call
                   ;children --> (function-expression . args)
                   ;args --> (expression list)
-                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas)) ;TODO this is a little weird; isn't it a scalar, not a variable.
+                  (create-doc ast) ;TODO this is a little weird; isn't it a scalar, not a variable.
                   (let* ((children (asn-children ast))
                          (func-expr (car children))
                          (args (cdr children))
@@ -588,7 +582,6 @@
                        (multiple-value-bind (class-name doc) (process-dojo-declare args)
                          (funcall append-doc-item class-name doc)))
                        
-
                       ((equal function-name "dojo.mixin")
                        (process-dojo-mixin args get-doc-item))
 
@@ -604,11 +597,11 @@
                       )))
                  
                  ((:dot :sub :comma :|\|\|| :&& :|\|| :^ :& :== :=== :!= :!== :< :> :<= :>= :instanceof :>> :<< :>>> :+ :- :* :/ :%)
-                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas)))
+                  (create-doc ast))
                  
                  (:conditional
                   ;children --> (list condition true-expr false-expr)
-                  (setf (asn-doc ast) (create-*-doc ast :variable #'map-object-pragmas))
+                  (create-doc ast)
                   (let* ((children (asn-children ast))
                          (condition (first children))
                          (true-expr (second children))

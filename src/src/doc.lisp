@@ -83,7 +83,7 @@
   (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
 
 ;
-; a param (function parameter) is a pair (name . types), types is a vector of pairs (type . doc-section), semenatics is a doc-section
+; a param (function parameter) is a pair (name . types), types is a vector of pairs (type . semantics), semenatics is a doc-section
 ; doc params is vector of param
 ;
 (defun make-doc-params ()
@@ -114,23 +114,24 @@
 ; a doc is holds all the documentation for a single code entity
 ;
 (defstruct doc
-  type     ;(:namespace | :type | :const | :enum | :variable | :function | :class | :resource)--the type of this documented entity
-  flags    ;list of keywords
-  sdoc     ;doc-section--short documentation
-  ldoc     ;doc-section--long documentation
-  requires ;vector of require items--the requirements/prerequisites to use this entity
-  provides ;vector of provided items
-  returns  ;vector of vector of (type . doc-section)
-  throws   ;vector of rt-item--possible thrown values
-  params   ;vector of param--the lambda list for a function
-  types    ;vector of types--vector of (type . section)
-  errors   ;vector of doc-section--possible error/abnormal conditions
-  supers   ;vector of string--superclasses
-  members  ;hash (name -> doc)--set of member methods/attributes for a class/object
-  refs     ;vector of string--references
-  inotes   ;doc-section--implementation notes
-  location ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
-  source   ;resource--the resource that sourced this entity
+  type       ;(:namespace | :type | :const | :enum | :variable | :function | :class | :resource)--the type of this documented entity
+  flags      ;list of keywords
+  sdoc       ;doc-section--short documentation
+  ldoc       ;doc-section--long documentation
+  requires   ;vector of require items--the requirements/prerequisites to use this entity
+  provides   ;vector of provided items
+  returns    ;vector of vector of (type . doc-section)
+  throws     ;vector of rt-item--possible thrown values
+  params     ;vector of param--the lambda list for a function
+  types      ;vector of types--vector of (type . section); used to document property types for an object
+  errors     ;vector of doc-section--possible error/abnormal conditions
+  supers     ;vector of string--superclasses
+  members    ;hash (name -> ast)--set of member methods/attributes for a class
+  properties ;hash (name -> ast)--set of properties for an object namespace, type, const, variable, or function
+  refs       ;vector of string--references
+  inotes     ;doc-section--implementation notes
+  location   ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
+  source     ;resource--the resource that sourced this entity
 )
 
 (defun doc-get-sdoc (doc)
@@ -162,13 +163,13 @@
 (defun doc-push-error (doc item)
   (setf (doc-errors doc) (doc-vector-push-item item (doc-errors doc))))
 
-(defun doc-push-member (doc name member)
-  (let ((members (doc-members doc)))
-    (if members
-        (setf (gethash name members) member)
+(defun doc-push-property (doc name property)
+  (let ((properties (doc-properties doc)))
+    (if properties
+        (setf (gethash name properties) property)
         (progn 
-          (setf (doc-members doc) (make-hash-table :test 'equal))
-          (doc-push-member doc name member)))))
+          (setf (doc-properties doc) (make-hash-table :test 'equal))
+          (doc-push-property doc name property)))))
 
 (defun doc-push-ref (doc item)
   (setf (doc-refs doc) (doc-vector-push-item item (doc-refs doc))))
@@ -231,10 +232,15 @@
           (dolist (item provides)
             (xml-emitter:with-simple-tag ("require" (list (cons "name" item)))))))))
 
-(defun dump-doc-props-to-xml (members)
-  (if (and members (plusp (hash-table-count members)))
+(defun dump-doc-props-to-xml (properties)
+  (if (and properties (plusp (hash-table-count properties)))
       (xml-emitter:with-tag ("properties")
-        (maphash #'dump-doc-item-to-xml members))))
+        (maphash (lambda (name ast) (dump-doc-item-to-xml name (asn-doc ast))) properties))))
+
+(defun dump-doc-members-to-xml (members)
+  (if (and members (plusp (hash-table-count members)))
+      (xml-emitter:with-tag ("members")
+        (maphash (lambda (name ast) (dump-doc-item-to-xml name (asn-doc ast))) members))))
 
 (defun dump-doc-supers-to-xml (supers)
   (if supers
@@ -253,8 +259,8 @@
     (dump-doc-section-to-xml "ldoc" (doc-ldoc doc))
     (dump-doc-section-to-xml "inotes" (doc-inotes doc))
     
-    (dump-doc-props-to-xml (doc-members doc))
     (dump-doc-types-to-xml (doc-types doc))
+    (dump-doc-props-to-xml (doc-properties doc))
     (dump-doc-returns-to-xml (doc-returns doc))
     (case (doc-type doc)
       (:function
@@ -265,7 +271,8 @@
        (dump-doc-requires-to-xml (doc-requires doc)))
 
       (:class
-       (dump-doc-supers-to-xml (doc-supers doc)))
+       (dump-doc-supers-to-xml (doc-supers doc))
+       (dump-doc-members-to-xml (doc-members doc)))
 
       ))
 )
