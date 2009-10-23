@@ -598,17 +598,17 @@
   (if (member (token-type token) '(:num :string))
       (let ((result (copy-token (get-token-and-advance))))
         (setf (token-type result) :name)
-        result)
+        (as-atom result))
       (as-name)))
 
 (defun as-name ()
     (case (token-type token)
-      (:name (get-token-and-advance))
+      (:name (as-atom (get-token-and-advance)))
 
       ((:operator :keyword :atom) 
        (let ((result (copy-token (get-token-and-advance))))
          (setf (token-type result) :name)
-         result))
+         (as-atom result)))
 
       (t (unexpected token))))
 

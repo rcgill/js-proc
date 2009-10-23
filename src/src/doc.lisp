@@ -168,7 +168,7 @@
     (if properties
         (setf (gethash name properties) property)
         (progn 
-          (setf (doc-properties doc) (make-hash-table :test 'equal))
+          (setf (doc-properties doc) (make-hash-table :test 'eq))
           (doc-push-property doc name property)))))
 
 (defun doc-push-ref (doc item)
@@ -235,12 +235,12 @@
 (defun dump-doc-props-to-xml (properties)
   (if (and properties (plusp (hash-table-count properties)))
       (xml-emitter:with-tag ("properties")
-        (maphash (lambda (name ast) (dump-doc-item-to-xml name (asn-doc ast))) properties))))
+        (maphash (lambda (name value) (dump-doc-item-to-xml (token-value (asn-children name)) (or  (asn-doc name) (asn-doc value)))) properties))))
 
 (defun dump-doc-members-to-xml (members)
   (if (and members (plusp (hash-table-count members)))
       (xml-emitter:with-tag ("members")
-        (maphash (lambda (name ast) (dump-doc-item-to-xml name (asn-doc ast))) members))))
+        (maphash (lambda (name value) (dump-doc-item-to-xml (token-value (asn-children name)) (or  (asn-doc name) (asn-doc value)))) members))))
 
 (defun dump-doc-supers-to-xml (supers)
   (if supers

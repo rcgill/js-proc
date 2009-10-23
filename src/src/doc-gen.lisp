@@ -131,7 +131,8 @@
                    (doc-chunk-text candidate) (concatenate 'string (aref match-strings 0) (aref match-strings 1)))
                   (setf
                    (doc-sdoc doc) (doc-section-push-chunk candidate)
-                   (doc-ldoc doc) (remove candidate (doc-ldoc doc)))))))))
+                   (doc-ldoc doc) (remove candidate (doc-ldoc doc))))))))
+  doc)
 
 (defun get-doc-chunk (pragma text section)
   (do ((contents (make-svector (line-text text)) )
@@ -218,57 +219,56 @@
         (dolist (p param-list params)
           (vector-push-extend (get-doc-param (car p) (cdr p)) params)))))
 
-(defun create-*-doc (ast type legal-pragmas &optional (force nil))
-  (let ((raw-doc (asn-comment ast)))
-    (if (or raw-doc force)
-        (let ((doc (make-doc :type type)))
-          (do* ((text (sift-pragmas raw-doc legal-pragmas))
-                (pragma (line-pragma text) (line-pragma text)))
-               ((not text))
-            (case pragma
-              ((:namespace :type :const :enum :variable) 
-               (setf 
-                (doc-type doc) pragma 
-                text (cdr text)))
-              
-              ((:kwargs :hash :nosource)
-               (push pragma (doc-flags doc))
-               (setf text (cdr text)))
-              
-              ((:note :warn :code)
-               (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+(defun create-*-doc (raw-doc type legal-pragmas &optional (force nil))
+  (if (or raw-doc force)
+      (let ((doc (make-doc :type type)))
+        (do* ((text (sift-pragmas raw-doc legal-pragmas))
+              (pragma (line-pragma text) (line-pragma text)))
+             ((not text))
+          (case pragma
+            ((:namespace :type :const :enum :variable) 
+             (setf 
+              (doc-type doc) pragma 
+              text (cdr text)))
+            
+            ((:kwargs :hash :nosource)
+             (push pragma (doc-flags doc))
+             (setf text (cdr text)))
+            
+            ((:note :warn :code)
+             (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
 
-              (:paramType ;for a object property
-               (multiple-value-bind (type section next) (get-doc-param-type-section text)
-                                 (doc-types-push-type doc type section)
-                                 (setf text next)))
-              
-              ((:todo :todoc :inote)
-               (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
-              
-              (:return
-                (setf text (get-doc-return/throw-subsection pragma text (doc-get-returns doc))))
-              
-              (:throw
-                  (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
-              
-              ((:end :endParamType)
-               (setf text (cdr text)))
-              
-              (t
-               (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
-          (fixup-sdoc doc)
-          (setf (asn-doc ast) doc)))))
+            (:paramType ;for a object property
+             (multiple-value-bind (type section next) (get-doc-param-type-section text)
+               (doc-types-push-type doc type section)
+               (setf text next)))
+            
+            ((:todo :todoc :inote)
+             (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
+            
+            (:return
+              (setf text (get-doc-return/throw-subsection pragma text (doc-get-returns doc))))
+            
+            (:throw
+                (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
+            
+            ((:end :endParamType)
+             (setf text (cdr text)))
+            
+            (t
+             (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
+        (fixup-sdoc doc))))
 
 (defun create-doc (ast &optional (force nil))
-  (create-*-doc ast :variable #'map-object-pragmas force))
+  (setf (asn-doc ast) (create-*-doc (asn-comment ast) :variable #'map-object-pragmas force)))
 
 (defun create-function-doc (ast)
   ;always create function docs because parameters may be defined or the body may contain return/throws
   ;in spite of the fact that no function definition exists
-  (create-*-doc ast :function #'map-function-pragmas t)
-  (setf (doc-params (asn-doc ast)) (get-doc-params (second (asn-children ast))))
-  (asn-doc ast))
+  (let ((doc (create-*-doc (asn-comment ast) :function #'map-function-pragmas t)))
+    (setf 
+     (doc-params doc) (get-doc-params (second (asn-children ast)))
+     (asn-doc ast) doc)))
 
 (defun process-return (ast current-doc)
   (do ((text (sift-pragmas (asn-comment ast) #'map-parameter-pragmas)))
@@ -351,10 +351,10 @@
   ;second of args should be an object
   (let ((base (token-value (asn-children (first args)))))
     (dolist (item (asn-children (second args)))
-      ;item is a cons (name . ast)
-      (let ((doc (asn-doc (cdr item))))
+      ;item is a cons (name(ast) . value(ast))
+      (let ((doc (or (asn-doc (car item)) (asn-doc (cdr item)))))
         (setf (doc-type doc) :type)
-        (funcall append-doc-item (concatenate 'string base "." (token-value (car item))) doc)))))
+        (funcall append-doc-item (concatenate 'string base "." (token-value (asn-children (car item)))) doc)))))
 
 ;;
 ;; These functions decode an ast node
@@ -367,7 +367,7 @@
      (concatenate 'string 
                   (get-ast-name (car (asn-children ast))) 
                   "." 
-                  (token-value (cdr (asn-children ast)))))
+                  (get-ast-name (cdr (asn-children ast)))))
     (t nil)))
 
 (defun doc-gen (resource append-doc-item get-doc-item)
@@ -540,24 +540,25 @@
                   ;always create a doc since this may be an object literal used in dojo.mixin or dojo.declare
                   (let ((doc (create-doc ast t)))
                     (dolist (property (asn-children ast))
-                      (let ((name (token-value (car property)))
-                            (value (cdr property)))
+                      (create-doc (car property))
+                      (let ((value (cdr property)))
                         (traverse value)
-                        (doc-push-property doc name value)))))
+                        (doc-push-property doc (car property) value)))))
 
                  ((:atom :num :string :regexp :name)
                   (create-doc ast))
 
                  ((:= :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=)
                   ;children --> (lhs . rhs)
-                  (if (asn-comment ast)
-                      ;the comment is really documenting the lhs
-                      (setf (asn-comment lhs) (asn-comment ast)
-                            (asn-comment ast) nil))
+                  
                   (let* ((children (asn-children ast))
                          (lhs (car children))
                          (rhs (cdr children))
                          (name (get-ast-name lhs)))
+                    (if (asn-comment ast)
+                      ;the comment is really documenting the lhs
+                      (setf (asn-comment lhs) (asn-comment ast)
+                            (asn-comment ast) nil))
                     (traverse rhs)
                     (let ((doc (asn-doc rhs)))
                       (if (and name doc)
