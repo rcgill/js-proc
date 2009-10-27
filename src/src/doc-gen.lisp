@@ -50,7 +50,7 @@
       :paramType
       (let ((pragma (gethash pragma *pragma-map*)))
         (case pragma
-          ((:mu :md :note :warn :code :todo :todoc :inote :end :endParamType) pragma)
+          ((:mu :md :case :note :warn :code :todo :todoc :inote :end :endParamType) pragma)
           (t nil)))))
 
 (defun map-comment-pragmas (pragma args)
@@ -347,14 +347,12 @@
 
 (defun process-bd-typedef (args append-doc-item)
   ;args is the list of argument expressions sent to bd.typedef; 
-  ;first of args should be an asn with type :string
-  ;second of args should be an object
-  (let ((base (token-value (asn-children (first args)))))
-    (dolist (item (asn-children (second args)))
-      ;item is a cons (name(ast) . value(ast))
+  ;first of args is an object that gives a hash of types
+  (dolist (item (asn-children (first args)))
+    ;item is a cons (name . value), both name and value or ast's, name should be a string
       (let ((doc (or (asn-doc (car item)) (asn-doc (cdr item)))))
         (setf (doc-type doc) :type)
-        (funcall append-doc-item (concatenate 'string base "." (token-value (asn-children (car item)))) doc)))))
+        (funcall append-doc-item (token-value (asn-children (car item))) doc)))))
 
 ;;
 ;; These functions decode an ast node
@@ -514,8 +512,6 @@
                   (dolist (expr (asn-children ast))
                     (traverse expr)))
 
-
-
                  (:new
                   ;children --> (new-expr . args)
                   ;args an expr-list asn
@@ -541,9 +537,9 @@
                   (let ((doc (create-doc ast t)))
                     (dolist (property (asn-children ast))
                       (create-doc (car property))
-                      (let ((value (cdr property)))
-                        (traverse value)
-                        (doc-push-property doc (car property) value)))))
+                      (traverse (cdr property))
+                      (create-doc (cdr property)))
+                    (setf (doc-properties doc) (asn-children ast))))
 
                  ((:atom :num :string :regexp :name)
                   (create-doc ast))
@@ -569,7 +565,7 @@
                  (:call
                   ;children --> (function-expression . args)
                   ;args --> (expression list)
-                  (create-doc ast) ;TODO this is a little weird; isn't it a scalar, not a variable.
+                  (create-doc ast) ;TODO this is a little weird; it's an expression
                   (let* ((children (asn-children ast))
                          (func-expr (car children))
                          (args (cdr children))

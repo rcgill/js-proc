@@ -37,20 +37,6 @@
 (defun make-doc-key (name type)
   (cons name type))
 
-(defun append-doc (name item)
-  (let ((key (make-doc-key name (doc-type item))))
-    (if (gethash key *doc-items*)
-        (format t "ERROR: multiple doc items for ~A~%." key)
-        (setf (gethash key *doc-items*) item))))
-
-(defun get-doc (name type &optional (create-p nil))
-  (let* ((key (make-doc-key name  type))
-         (item (gethash key *doc-items*)))
-    (if item
-        item
-        (if create-p
-            (setf (gethash key *doc-items*) (make-doc :type type))))))
-
 (defun process-batch (batch)
   (let ((resources (make-array 100 :element-type 'resource :fill-pointer 0))
         (path (car batch)))
@@ -62,21 +48,32 @@
         (vector-push (make-resource :name name :filename filename :text (read-source-filename filename)) resources)))
 
     (format t "lexing...~%")
-    (map nil (lambda (item) (show-progress item) (setf (resource-raw-tokens item) (lex (resource-text item)))) resources)
+    (map nil (lambda (resource) (show-progress resource) (setf (resource-raw-tokens resource) (lex (resource-text resource)))) resources)
 
     (format t "folding comments...~%")
-    (map nil (lambda (item) (show-progress item) (setf (resource-folded-tokens item) (fold-comments (resource-raw-tokens item)))) resources)
+    (map nil (lambda (resource) (show-progress resource) (setf (resource-folded-tokens resource) (fold-comments (resource-raw-tokens resource)))) resources)
 
     (format t "parsing...~%")
-    (map nil (lambda (item) (show-progress item) (setf (resource-ast item) (parse-js (resource-folded-tokens item)))) resources)
+    (map nil (lambda (resource) (show-progress resource) (setf (resource-ast resource) (parse-js (resource-folded-tokens resource)))) resources)
 
     (format t "traversing...~%")
-    (map nil (lambda (item) 
-               (show-progress item) 
-               (doc-gen item #'append-doc #'get-doc))
+    (map nil (lambda (resource) 
+               (show-progress resource)
+               (labels ((append-doc-for-this-resource (name doc)
+                          (setf (doc-source doc) resource)
+                          (let ((key (make-doc-key name (doc-type doc))))
+                            (if (gethash key *doc-items*)
+                                (format t "ERROR: multiple doc items for ~A~%." key)
+                                (setf (gethash key *doc-items*) doc))))
+
+                        (get-doc (name type &optional (create-p nil))
+                          (let* ((key (make-doc-key name type))
+                                 (doc (gethash key *doc-items*)))
+                            (or doc (and create-p (setf (gethash key *doc-items*) (make-doc :type type :source resource)))))))
+                 (doc-gen resource #'append-doc-for-this-resource #'get-doc)))
          resources)
 
-    (dump-doc-items *standard-output* *doc-items*)
+    (dump-doc-items-to-json *standard-output* *doc-items*)
 
     (format t "done...~%")
 

@@ -12,7 +12,9 @@
                          (:file "parse" :depends-on ("tokenize"))
                          (:file "drivers" :depends-on ("reader" "tokenize" "parse"))
                          (:file "doc" :depends-on ("package"))
-                         (:file "doc-gen" :depends-on ("parse" "doc"))))))
+                         (:file "doc-gen" :depends-on ("parse" "doc"))
+                         (:file "xml-gen" :depends-on ("doc"))
+                         (:file "json-gen" :depends-on ("doc"))))))
 
 (asdf:oos 'asdf:load-op :js-proc)
 
