@@ -350,9 +350,12 @@
   ;first of args is an object that gives a hash of types
   (dolist (item (asn-children (first args)))
     ;item is a cons (name . value), both name and value or ast's, name should be a string
-      (let ((doc (or (asn-doc (car item)) (asn-doc (cdr item)))))
-        (setf (doc-type doc) :type)
-        (funcall append-doc-item (token-value (asn-children (car item))) doc)))))
+    (let* ((name (car item))
+           (value (cdr item))
+           (doc (or (asn-doc name) (asn-doc value))))
+      ;(format t "~A~%" value)
+      (setf (doc-type doc) :type)
+      (funcall append-doc-item (token-value (asn-children name)) doc))))
 
 ;;
 ;; These functions decode an ast node
@@ -534,12 +537,13 @@
                  (:object
                   ;children --> list of (property-name . expression)
                   ;always create a doc since this may be an object literal used in dojo.mixin or dojo.declare
-                  (let ((doc (create-doc ast t)))
-                    (dolist (property (asn-children ast))
-                      (create-doc (car property))
-                      (traverse (cdr property))
-                      (create-doc (cdr property)))
-                    (setf (doc-properties doc) (asn-children ast))))
+                  (dolist (property (asn-children ast))
+                    (create-doc (car property))
+                    (traverse (cdr property)))
+                  (create-doc ast t)
+                  (setf (doc-properties (asn-doc ast)) (asn-children ast))
+;                  (format t "~A~%" ast)
+)
 
                  ((:atom :num :string :regexp :name)
                   (create-doc ast))
