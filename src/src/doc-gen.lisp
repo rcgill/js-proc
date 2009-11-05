@@ -230,7 +230,7 @@
              (setf 
               (doc-type doc) pragma 
               text (cdr text)))
-            
+
             ((:kwargs :hash :nosource)
              (push pragma (doc-flags doc))
              (setf text (cdr text)))

@@ -19,12 +19,14 @@
   (labels (
            (escape-string (string)
              (with-output-to-string (stream)
+               (write-char #\" stream)
                (dotimes (i (length string))
                  (let ((c (char string i))) 
                    (case c
                      (#\newline (write-string "\\n" stream))
                      ((#\" #\' #\\) (write-char #\\ stream) (write-char c stream))
-                     (t (write-char c stream)))))))
+                     (t (write-char c stream)))))
+               (write-char #\" stream)))
 
            (quote-string (string)
              (concatenate 'string "\"" string "\""))
@@ -59,7 +61,7 @@
 
            (dump-section-chunk (chunk)
              ;;section chunk is a cons (pragma . text)
-             (concatenate 'string "[" (symbol-name (car chunk)) ",\"" (escape-string (cdr chunk)) "\"]"))
+             (concatenate 'string "[" (symbol-name (car chunk)) "," (escape-string (cdr chunk)) "]"))
            
            (dump-section (section)
              ;;section is a vector of chunks
@@ -73,7 +75,7 @@
 
            (dump-type-section (type-section)
                                         ;type-section is a cons (type . section)
-             (cat-pair (quote-string (car type-section)) (dump-section (cdr type-section)) t))
+             (cat-pair (escape-string (car type-section)) (dump-section (cdr type-section)) t))
 
            (dump-type-section-vector (type-section-vector)
              (cat-array (map 'vector #'dump-type-section type-section-vector) t))
@@ -98,7 +100,7 @@
                     (value-asn (cdr property))
                     (name (token-value (asn-children name-asn)))
                     (doc (or (asn-doc name-asn) (asn-doc value-asn))))
-               (dump-doc-item name doc)))
+               (concatenate 'string (quote-string name) "," (dump-doc-item nil doc))))
 
            (dump-properties (properties)
              ;;properties is a list of (name . expr); name and expr are ast's
@@ -112,14 +114,13 @@
               (cat-prop-value "types" (dump-type-section-vector types))))
 
            (dump-source (source)
-             (and source (cat-prop-value "src" (resource-name source))))
+             (and source (cat-prop-value "src" (quote-string (resource-name source)))))
 
-           (open-object (name)
-             (concatenate 'string lbrace-new-line-str (cat-prop-value "name" name)))
+           (dump_type (type) 
+             (string-upcase type))
 
            (dump-doc-item (name item)
-             (let ((result (open-object name)))
-               (setf result (cat-prop result (cat-prop-value "type" (string-downcase (doc-type item)))))
+             (let ((result (cat-prop-value "type" (dump_type (doc-type item)))))
                (setf result (cat-prop result (dump-sdoc (doc-sdoc item))))
                (setf result (cat-prop result (dump-ldoc (doc-ldoc item))))
                (setf result (cat-prop result (dump-params (doc-params item))))
@@ -127,7 +128,10 @@
                (setf result (cat-prop result (dump-properties (doc-properties item))))
                (setf result (cat-prop result (dump-source (doc-source item))))
                (setf result (cat-prop result (dump-types (doc-types item))))
-               (concatenate 'string result rbrace-new-line-str)))
+               (setf result (concatenate 'string lbrace-new-line-str result rbrace-new-line-str))
+               (if name
+                 (concatenate 'string (quote-string name) ":" result)
+                 result)))
            )
     
     (let ((result ""))

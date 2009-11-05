@@ -28,6 +28,18 @@
 (defun show-progress (item)
   (format t "~I~A~%" (resource-name item)))
 
+(defun get-wrapper-file (filename)
+  (with-open-file (in filename)
+    (let ((top (read-line in))
+          (bottom nil))
+      (do ((line (read-line in) (read-line in nil)))
+          ((not line) (values top bottom))
+        (if (not bottom)
+            (if (equal line "//CONTENTS")
+                (setf bottom (read-line in))
+                (setf top (concatenate 'string top new-line-str line)))
+            (setf bottom (concatenate 'string bottom new-line-str line)))))))
+
 ;;
 ;; This is the document stack
 ;;
@@ -73,7 +85,11 @@
                  (doc-gen resource #'append-doc-for-this-resource #'get-doc)))
          resources)
 
-    (dump-doc-items-to-json *standard-output* *doc-items*)
+    (multiple-value-bind (prefix suffix) (get-wrapper-file "/home/rcgill/dev/backdraft/doc/com.altoviso.backdraft.api.ref.main.js")
+      (with-open-file (out "/home/rcgill/dev/backdraft/doc/generated/com.altoviso.backdraft.api.ref-main.js" :direction :output :if-exists :supersede)
+        (format out "~A~%" prefix)
+        (dump-doc-items-to-json out *doc-items*)
+        (format out "~A~%" suffix)))
 
     (format t "done...~%")
 
@@ -124,7 +140,7 @@
               "bd.dijit.button"
               "bd.dijit.verticalSlider"
               "bd.dijit.horizontalSlider"
-1              "bd.dijit.mixin.core"
+              "bd.dijit.mixin.core"
               "bd.dijit.mixin.container"
               "bd.dijit.mixin.navigator"
               "bd.dijit.menu"
