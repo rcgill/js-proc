@@ -86,7 +86,7 @@
          resources)
 
     (multiple-value-bind (prefix suffix) (get-wrapper-file "/home/rcgill/dev/backdraft/doc/com.altoviso.backdraft.api.ref.main.js")
-      (with-open-file (out "/home/rcgill/dev/backdraft/doc/generated/com.altoviso.backdraft.api.ref-main.js" :direction :output :if-exists :supersede)
+      (with-open-file (out "/home/rcgill/dev/backdraft/doc/generated/com.altoviso.backdraft.api.ref.main.js" :direction :output :if-exists :supersede)
         (format out "~A~%" prefix)
         (dump-doc-items-to-json out *doc-items*)
         (format out "~A~%" suffix)))

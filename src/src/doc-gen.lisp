@@ -321,15 +321,22 @@
         (setf (doc-supers doc) (mapcar #'get-ast-name (asn-children supers))))
     (values class-name doc)))
 
-(defun process-dojo-mixin (arg-list get-doc-item)
-  (let* ((name (get-ast-name (first arg-list)))
-         (src (and (eq (asn-type (second arg-list)) :object) (doc-properties (asn-doc (second arg-list)))))
-         (dest (and src (or 
-                (funcall get-doc-item name :namespace)
-                (funcall get-doc-item name :variable)
-                (funcall get-doc-item name :function)))))
-    (if dest
-        (maphash (lambda (name value)  (doc-push-property dest name value)) src))))
+(defun process-dojo-mixin (arg-list get-doc-item append-doc-item)
+  (let* ((parent-name (get-ast-name (first arg-list)))
+         (parent (or 
+                   (funcall get-doc-item parent-name :namespace)
+                   (funcall get-doc-item parent-name :variable)
+                   (funcall get-doc-item parent-name :function))))
+    (if parent
+        (let* ((arg2 (second arg-list))
+               (children (and (eq (asn-type arg2) :object) (asn-children arg2))))
+          (dolist (prop children)
+            ;prop is (name . expr), both are asn's
+            (let* ((prop-name (car prop))
+                   (prop-value (cdr prop))
+                   (prop-doc (or (asn-doc prop-name) (asn-doc prop-value))))
+              (if prop-doc
+                  (funcall append-doc-item (concatenate 'string parent-name "." (get-ast-name prop-name)) prop-doc))))))))
 
 (defun process-dojo-provide (args resource)
   ;args is the list of argument expressions sent to dojo.provide
@@ -431,9 +438,11 @@
 
                  (:var
                   ;children --> vardefs
-                  ;vardefs is a list of lexical-var
+                  ;vardefs is a list of lexical-var (name, init-val(expr), comment)
                   ;name is a token, expr is an expression or nil
                   (dolist (def (asn-children ast))
+                    (if (and (lexical-var-comment def) (eq (length doc-stack) 1))
+                        (funcall append-doc-item (token-value (lexical-var-name def)) (create-*-doc (lexical-var-comment def) :variable #'map-object-pragmas t)))
                     (and (lexical-var-init-val def) (traverse (lexical-var-init-val def)))))
 
                  (:while
@@ -541,9 +550,7 @@
                     (create-doc (car property))
                     (traverse (cdr property)))
                   (create-doc ast t)
-                  (setf (doc-properties (asn-doc ast)) (asn-children ast))
-;                  (format t "~A~%" ast)
-)
+                  (setf (doc-properties (asn-doc ast)) (asn-children ast)))
 
                  ((:atom :num :string :regexp :name)
                   (create-doc ast))
@@ -555,16 +562,16 @@
                          (lhs (car children))
                          (rhs (cdr children))
                          (name (get-ast-name lhs)))
+                    (format t "in ~A~%" name)
                     (if (asn-comment ast)
-                      ;the comment is really documenting the lhs
-                      (setf (asn-comment lhs) (asn-comment ast)
-                            (asn-comment ast) nil))
+                        (create-doc ast))
                     (traverse rhs)
-                    (let ((doc (asn-doc rhs)))
+                    (let ((doc (or (asn-doc ast) (asn-doc rhs))))
                       (if (and name doc)
                           (progn
                             (setf (doc-location doc) (asn-location ast))
-                            (funcall append-doc-item name doc))))))
+                            (funcall append-doc-item name doc)))
+                      (format t "out ~A~%" name))))
 
                  (:call
                   ;children --> (function-expression . args)
@@ -583,7 +590,7 @@
                          (funcall append-doc-item class-name doc)))
                        
                       ((equal function-name "dojo.mixin")
-                       (process-dojo-mixin args get-doc-item))
+                       (process-dojo-mixin args get-doc-item append-doc-item))
 
                       ((equal function-name "dojo.provide")
                        (process-dojo-provide args resource))

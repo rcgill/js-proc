@@ -290,7 +290,7 @@
    :type (or (and (symbolp op) op) (token-value op)) ;one of... 
      ; :dot :sub :call :comma
      ; :\\ :&& :\ :^ :& :== :=== :!= :!== :< :> :<= :>= :in :instanceof :>> :<< :>>> :+ :- :* :/ :%
-     ; :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :\= :^=
+     ; := :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :\= :^=
    :comment (and (token-p op) (token-comment op))
    :location (or location (sum-locations lhs rhs))
    :children (cons lhs rhs)))

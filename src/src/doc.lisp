@@ -163,15 +163,6 @@
 (defun doc-push-error (doc item)
   (setf (doc-errors doc) (doc-vector-push-item item (doc-errors doc))))
 
-(defun doc-push-property (doc name property)
-  ;;name and property or asn's
-  (let ((properties (doc-properties doc)))
-    (if properties
-        (vector-push-extend (cons name property) properties)
-        (progn 
-          (setf (doc-properties doc) (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
-          (doc-push-property doc name property)))))
-
 (defun doc-push-ref (doc item)
   (setf (doc-refs doc) (doc-vector-push-item item (doc-refs doc))))
 
