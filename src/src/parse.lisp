@@ -246,7 +246,7 @@
 (defun as-new (new-token new-expr args)
   (make-asn
    :type :new
-   :location (sum-locations new-token args)
+   :location (sum-locations new-token (or args new-expr))
    :children (cons new-expr args)))
 
 (defun as-unary-prefix (op expr)
@@ -563,13 +563,13 @@
 
 (defun new* (new-token)
   (next)
-  (let ((new-expr (expr-atom nil))
-        (args (if (tokenp token :punc #\()
-                  (let ((opening (get-token-and-advance))
-                        (args (expr-list #\)))
-                        (closing (get-token-and-advance)))
-                    (as-expr-list opening args closing)))))
-    (subscripts (as-new new-token new-expr args) t)))
+  (let ((new-expr (expr-atom nil)))
+        (let ((args (if (tokenp token :punc #\()
+                        (let ((opening (get-token-and-advance))
+                              (args (expr-list #\)))
+                              (closing (get-token-and-advance)))
+                          (as-expr-list opening args closing)))))
+          (subscripts (as-new new-token new-expr args) t))))
 
 (defun expr-atom (allow-calls)
   (cond 

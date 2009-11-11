@@ -138,6 +138,7 @@
   (or (doc-sdoc doc) (setf (doc-sdoc doc) (make-doc-section))))
 
 (defun doc-get-ldoc (doc)
+
   (or (doc-ldoc doc) (setf (doc-ldoc doc) (make-doc-section))))
 
 (defun doc-get-inotes (doc)

@@ -299,10 +299,10 @@
                  end-char (location-end-char (token-location token)))
                 (vector-push (token-value token) comment))
               (if (>= (1+ last-non-comment-token-line) start-line) 
-                  (setf (token-comment (aref result (1- (fill-pointer result)))) comment)
+                  (setf (token-comment (aref result (1- (fill-pointer result)))) (list comment start-line start-char end-line end-char))
                   (vector-push (make-token 
                                 :type :comment 
-                                :value comment 
+                                :value (list comment start-line start-char end-line end-char)
                                 :location (make-location :start-line start-line :start-char start-char :end-line end-line :end-char end-char)
                                 :newline-before start-newline-before) result)))
             (progn (setf last-non-comment-token-line (token-line token)) (vector-push token result)))))))

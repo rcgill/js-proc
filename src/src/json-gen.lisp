@@ -17,16 +17,16 @@
 
 (defun dump-doc-items-to-json (stream doc-items)
   (labels (
-           (escape-string (string)
+           (escape-string (string &optional (quote t))
              (with-output-to-string (stream)
-               (write-char #\" stream)
+               (and quote (write-char #\" stream))
                (dotimes (i (length string))
                  (let ((c (char string i))) 
                    (case c
                      (#\newline (write-string "\\n" stream))
                      ((#\" #\' #\\) (write-char #\\ stream) (write-char c stream))
                      (t (write-char c stream)))))
-               (write-char #\" stream)))
+               (and quote (write-char #\" stream))))
 
            (quote-string (string)
              (concatenate 'string "\"" string "\""))
@@ -107,7 +107,7 @@
                     (doc (or (asn-doc name-asn) (asn-doc value-asn))));doc could be nil
                (if doc
                    (concatenate 'string (quote-string name) "," (dump-doc-item nil doc))
-                   (concatenate 'string (quote-string name) "," "{" (dump-source-location value-asn) "}"))))
+                   (concatenate 'string (quote-string name) "," "{" (dump-source-location (asn-location value-asn)) "}"))))
 
            (dump-properties (properties)
              ;properties is a list of (name . expr); name and expr are ast's
@@ -120,19 +120,25 @@
               (plusp (length types))
               (cat-prop-value "types" (dump-type-section-vector types))))
 
-           (dump-source (source)
+           (dump-source-name (source)
              (and source (cat-prop-value "src" (quote-string (resource-name source)))))
 
-           (dump-source-location (asn)
-             (let ((location (asn-location asn)))
-               (format nil "loc: [~A,~A,~A,~A]" (location-start-line location) (location-start-char location) (location-end-line location) (location-end-char location))))
+           (dump-source-location (loc)
+             (if loc
+                 (format nil "loc: [~A,~A,~A,~A]" (location-start-line loc) (location-start-char loc) (location-end-line loc) (location-end-char loc))))
+
+           (dump-source (text)
+             ;text is a vector of strings
+             (let ((result (reduce #'(lambda (l1 l2) (concatenate 'string l1 comma-new-line-str l2))
+                                   (map 'vector #'(lambda (line) (concatenate 'string "\"" (escape-string line nil) "\"")) text))))
+               (cat-prop-value "code" (concatenate 'string "[" result "]"))))
 
            (dump-type (type) 
              (format nil "s(\"~A_\")" (string-downcase type)))
 
            (dump-name (name type)
              (case type
-               (:resource (concatenate 'string "\"resources." name "\""))
+               (:resource (concatenate 'string "\"resource." name "\""))
                (otherwise (quote-string name))))
 
            (dump-doc-item (name item)
@@ -142,8 +148,11 @@
                (setf result (cat-prop result (dump-params (doc-params item))))
                (setf result (cat-prop result (dump-returns (doc-returns item))))
                (setf result (cat-prop result (dump-properties (doc-properties item))))
-               (setf result (cat-prop result (dump-source (doc-source item))))
+               (setf result (cat-prop result (dump-source-name (doc-source item))))
+               (setf result (cat-prop result (dump-source-location (doc-location item))))
                (setf result (cat-prop result (dump-types (doc-types item))))
+               (if (eq (doc-type item) :resource)
+                   (setf result (cat-prop result (dump-source (resource-text (doc-source item))))))
                (setf result (concatenate 'string lbrace-new-line-str result rbrace-new-line-str))
                (if name
                  (concatenate 'string (dump-name name (doc-type item)) ":" result)
