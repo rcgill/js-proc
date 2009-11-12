@@ -84,10 +84,10 @@
              ;;types is a vector of (type . section)
              (cat-array (map 'vector #'dump-type-section types) t))
 
-           (dump-returns (returns)
+           (dump-returns-throws (returns type)
              ;;returns is type-section-vector
              (and (plusp (length returns)) 
-                  (cat-prop-value "returns" (dump-type-section-vector returns))))
+                  (cat-prop-value (or (and (eq type :returns) "returns") "exceptions") (dump-type-section-vector returns))))
 
            (dump-param (param)
              ;;param is a cons (name . type-section-vector)
@@ -146,7 +146,8 @@
                (setf result (cat-prop result (dump-sdoc (doc-sdoc item))))
                (setf result (cat-prop result (dump-ldoc (doc-ldoc item))))
                (setf result (cat-prop result (dump-params (doc-params item))))
-               (setf result (cat-prop result (dump-returns (doc-returns item))))
+               (setf result (cat-prop result (dump-returns-throws (doc-returns item) :returns)))
+               (setf result (cat-prop result (dump-returns-throws (doc-throws item) :throws)))
                (setf result (cat-prop result (dump-properties (doc-properties item))))
                (setf result (cat-prop result (dump-source-name (doc-source item))))
                (setf result (cat-prop result (dump-source-location (doc-location item))))

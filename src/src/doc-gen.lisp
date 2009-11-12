@@ -49,11 +49,12 @@
           (t nil)))))
 
 (defun map-function-pragmas (pragma args)
-  (declare (ignore args))
-  (let ((pragma (gethash pragma *pragma-map*)))
-    (case pragma
-      ((:mu :md :note :warn :code :todo :todoc :inote :end :return :throw :case :result :nosource) pragma)
-      (t nil))))
+  (if (and (not pragma) args)
+      :paramType
+      (let ((pragma (gethash pragma *pragma-map*)))
+        (case pragma
+          ((:mu :md :note :warn :code :todo :todoc :inote :end :return :throw :case :result :nosource) pragma)
+          (t nil)))))
 
 (defun map-parameter-pragmas (pragma args)
   (if (or (eq pragma :result) (and (not pragma) args))
@@ -176,10 +177,14 @@
          p)
       (vector-push-extend (line-text p) contents))))
 
-(defun get-doc-return/throw-subsection (pragma text section)
-  ;TODO
-  (declare (ignore pragma text section))
-)
+(defun get-doc-return/throw-subsection (text doc push-function)
+  (do ()
+      ((or (not text) (not (eq (line-pragma text) :paramType)))
+       text)
+    (multiple-value-bind 
+          (type section next) (get-doc-param-type-section text)
+      (funcall push-function doc type section)
+      (setf text next))))
 
 (defun get-doc-param-type-section (text)
   ;text is a sifted list of pragmas; the first pragma should be a :paramType
@@ -191,7 +196,7 @@
          ((or (not p) (eq pragma :paramType) (eq pragma :end))
           (values type section p))
       (case pragma
-        ((:note :warn :code)
+        ((:note :warn :code :case)
          (setf p (get-doc-simple-subsection pragma p section)))
         (:end
          (setf p (cdr p)))
@@ -234,7 +239,7 @@
   (cond
     ((not comment) nil)
 
-    ((fifth comment) t)
+    ((sixth comment) t)
 
     (t (let ((line (aref (first comment) 0)))
          (and (>= (length line) 3) (equal (subseq line 0 3) "///"))))))
@@ -268,10 +273,14 @@
              (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
             
             (:return
-              (setf text (get-doc-return/throw-subsection pragma text (doc-get-returns doc))))
+              ;TODO--this is sloppy--we demand that a return be on an empty line
+              (setf text (cdr text))
+              (setf text (get-doc-return/throw-subsection text doc #'doc-push-return)))
             
             (:throw
-                (setf text (get-doc-return/throw-subsection pragma text (doc-get-throws doc))))
+                ;TODO--this is sloppy--we demand that a throw be on an empty line
+                (setf text (cdr text))
+                (setf text (get-doc-return/throw-subsection text doc #'doc-push-throw)))
             
             (:end
              (setf text (cdr text)))
@@ -610,7 +619,8 @@ bombs out the regex
                       (create-doc (car property))
                       (traverse (cdr property)))))
                   (if (asn-doc ast)
-                      (setf (doc-properties (asn-doc ast)) (asn-children ast))))
+                      (setf (doc-location (asn-doc ast)) (asn-location ast)
+                            (doc-properties (asn-doc ast)) (asn-children ast))))
 
                  ((:atom :num :string :regexp :name)
                   (create-doc ast))

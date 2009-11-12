@@ -107,8 +107,15 @@
       (vector-push-extend (cons type section) (doc-returns doc))
       (progn
         (setf (doc-returns doc) (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
-        (doc-push-return doc type section)))
-)
+        (doc-push-return doc type section))))
+
+;;TODO--this is sloppy; these two functions above/below should be refactored.
+(defun doc-push-throw (doc type section)
+  (if (doc-throws doc)
+      (vector-push-extend (cons type section) (doc-throws doc))
+      (progn
+        (setf (doc-throws doc) (make-array 1 :element-type 'cons :fill-pointer 0 :adjustable t))
+        (doc-push-throw doc type section))))
       
 ;
 ; a doc is holds all the documentation for a single code entity
