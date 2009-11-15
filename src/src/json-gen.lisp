@@ -114,6 +114,18 @@
              (and (plusp (length properties))
                   (cat-prop-value "props" (cat-array (map 'vector #'dump-property properties) t))))
 
+           (dump-member (class-name member)
+             ;;member is a cons (name . expr), name and expr are asn's
+             ;the comment may be on either the name of the expr
+             (let* ((name-asn (car member))
+                    (value-asn (cdr member))
+                    (name (token-value (asn-children name-asn)))
+                    (doc (or (asn-doc name-asn) (asn-doc value-asn))));doc could be nil
+               (if doc
+                   (progn
+                     (setf (doc-location doc) (sum-locations (asn-location name-asn) (asn-location value-asn)))
+                     (dump-doc-item (concatenate 'string class-name "." name) doc t)))))
+
            (dump-types (types)
              ;;types is a type-section-vector
              (and 
@@ -141,10 +153,17 @@
                (:resource (concatenate 'string "\"resource." name "\""))
                (otherwise (quote-string name))))
 
-           (dump-doc-item (name item)
+           (dump-flags (flags)
+             (if flags
+                 (cat-prop-value "flags" (cat-array (map 'vector (lambda (flag) (format nil "s(\"~A_\")" (string-downcase flag))) flags)))))
+
+           (dump-doc-item (name item &optional (class-member nil))
              (let ((result (cat-prop-value "type" (dump-type (doc-type item)))))
                (setf result (cat-prop result (dump-sdoc (doc-sdoc item))))
+               (if class-member
+                   (setf result (cat-prop result "imember:1")))
                (setf result (cat-prop result (dump-ldoc (doc-ldoc item))))
+               (setf result (cat-prop result (dump-flags (doc-flags item))))
                (setf result (cat-prop result (dump-params (doc-params item))))
                (setf result (cat-prop result (dump-returns-throws (doc-returns item) :returns)))
                (setf result (cat-prop result (dump-returns-throws (doc-throws item) :throws)))
@@ -156,8 +175,10 @@
                    (setf result (cat-prop result (dump-source (resource-text (doc-source item))))))
                (setf result (concatenate 'string lbrace-new-line-str result rbrace-new-line-str))
                (if name
-                 (concatenate 'string (dump-name name (doc-type item)) ":" result)
-                 result)))
+                 (setf result (concatenate 'string (dump-name name (doc-type item)) ":" result)))
+               (map nil (lambda (member)
+                          (setf result (concatenate 'string result "," (dump-member name member)))) (doc-members item))
+               result))
            )
     
     (let ((result ""))

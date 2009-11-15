@@ -98,7 +98,7 @@
 (defun sources ()
   (cons "/usr/home/rcgill/dev/backdraft/src/"
         (list "bd"
-              ;"bd.frenzy"
+              "bd.frenzy"
 #|
               "bd.descriptor.processor"
               "bd.descriptor.cache"

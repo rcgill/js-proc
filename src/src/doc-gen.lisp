@@ -12,7 +12,7 @@
 
 (defparameter *pragma-map*
   (let ((pragmas (make-hash-table :test 'equal)))
-    (dolist (word '(:mu :md :namespace :const :enum :type :variable :kwargs :hash :nosource :note :warn :code :return :throw :case :result :todo :todoc :inote :file))
+    (dolist (word '(:mu :md :namespace :const :enum :type :variable :kwargs :hash :private :nosource :note :warn :code :return :throw :case :todo :todoc :inote :file))
       (let ((word-string (string-downcase (string word))))
         (setf 
          (gethash word-string pragmas) word
@@ -27,7 +27,6 @@
      (gethash "t" pragmas) :throw
      (gethash "c" pragmas) :code
      (gethash ">" pragmas) :case
-     (gethash "<" pragmas) :result
      (gethash "in" pragmas) :inote
      (gethash "/n" pragmas) :note
      (gethash "/w" pragmas) :warn
@@ -35,42 +34,15 @@
      (gethash "/t" pragmas) :throw
      (gethash "/c" pragmas) :code
      (gethash "/>" pragmas) :case
-     (gethash "/<" pragmas) :result
      (gethash "/in" pragmas) :inote
      )
     pragmas))
 
-(defun map-object-pragmas (pragma args)
-  (if (and (not pragma) args)
-      :paramType
-      (let ((pragma (gethash pragma *pragma-map*)))
-        (case pragma
-          ((:mu :md :note :warn :code :todo :todoc :inote :end :namespace :const :enum :type :variable :kwargs :hash :nosource) pragma)
-          (t nil)))))
-
-(defun map-function-pragmas (pragma args)
-  (if (and (not pragma) args)
-      :paramType
-      (let ((pragma (gethash pragma *pragma-map*)))
-        (case pragma
-          ((:mu :md :note :warn :code :todo :todoc :inote :end :return :throw :case :result :nosource) pragma)
-          (t nil)))))
-
-(defun map-parameter-pragmas (pragma args)
-  (if (or (eq pragma :result) (and (not pragma) args))
-      :paramType
-      (let ((pragma (gethash pragma *pragma-map*)))
-        (case pragma
-          ((:mu :md :case :note :warn :code :todo :todoc :inote :end) pragma)
-          (t nil)))))
-
-(defun map-comment-pragmas (pragma args)
-  (declare (ignore args))
+(defun check-pragma (pragma args)
   (let ((pragma (gethash pragma *pragma-map*)))
-    (case pragma
-      ((:file :mu :md :note :warn :code :todo :todoc :inote :end) pragma)
-      (t nil))))
-  
+    (if (and (or (eq pragma :end) (not pragma)) args) 
+        :paramType
+        pragma)))
 
 (defstruct sifted-line
   pragma ;the pragma on the line; nil if none
@@ -95,7 +67,7 @@
 (defparameter non-space-scanner 
   (cl-ppcre:create-scanner "\\S"))
 
-(defun sift-pragmas (text pragma-map)
+(defun sift-pragmas (text)
   ; map text to a list of sifted-lines
   ; nil pragma implies there was no pragma as given by *pragmas*
   ; text is modified by replacing the pragma positions with spaces, right-trimming, and deleting any leading "//"
@@ -103,7 +75,7 @@
   (map 'list 
        (lambda (s)
          (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings pragma-scanner s)
-           (let* ((pragma (and match (funcall pragma-map (aref match-strings 4) (aref match-strings 6))))
+           (let* ((pragma (and match (check-pragma (aref match-strings 4) (aref match-strings 6))))
                   (rest-of-line (and pragma (aref match-strings 7) (string-right-trim '(#\Space #\Tab) (aref match-strings 7))))
                   (spaces (and rest-of-line (make-string (do ;the sum of the lengths of match-strings 2, 3, 4, 5
                                                           ((sum 0)
@@ -146,7 +118,7 @@
   doc)
 
 (defun get-doc-chunk (pragma text section)
-  (do ((contents (make-svector (line-text text)) )
+  (do ((contents (make-svector (line-text text)))
         (p (cdr text) (cdr p)))
       ((or (not p) (line-pragma p))
        (let ((chunk (make-doc-chunk pragma contents)))
@@ -198,15 +170,18 @@
       (case pragma
         ((:note :warn :code :case)
          (setf p (get-doc-simple-subsection pragma p section)))
+
         (:end
-         (setf p (cdr p)))
+         (if (line-text p) 
+             (setf p (get-doc-chunk :md p section))    
+             (setf p (cdr p))))
         (t
          (setf p (get-doc-chunk (or pragma :md) p section)))))))
 
 (defun get-doc-param (name raw-doc)
   (let ((param (make-doc-param name))
         (general-section (make-doc-section)))
-    (do* ((text (sift-pragmas raw-doc #'map-parameter-pragmas))
+    (do* ((text (sift-pragmas raw-doc))
          (pragma (line-pragma text) (line-pragma text)))
         ((not text) 
          (if (plusp (length general-section))
@@ -222,7 +197,9 @@
          (setf text (get-doc-simple-subsection pragma text general-section)))
 
         (:end
-         (setf text (cdr text)))
+         (if (line-text text) 
+             (setf text (get-doc-chunk :md text general-section))    
+             (setf text (cdr text))))
                  
         (t
          (setf text (get-doc-chunk (or pragma :md) text general-section)))))))
@@ -244,11 +221,11 @@
     (t (let ((line (aref (first comment) 0)))
          (and (>= (length line) 3) (equal (subseq line 0 3) "///"))))))
 
-(defun create-*-doc (raw-doc type legal-pragmas)
+(defun create-*-doc (raw-doc type)
   ;raw-doc is a vector of strings; create iff raw-doc[0][0..2]==="///"
   (if (gen-doc raw-doc)
       (let ((doc (make-doc :type type)))
-        (do* ((text (sift-pragmas (first raw-doc) legal-pragmas))
+        (do* ((text (sift-pragmas (first raw-doc)))
               (pragma (line-pragma text) (line-pragma text)))
              ((not text))
           (case pragma
@@ -260,7 +237,13 @@
             ((:kwargs :hash :nosource)
              (push pragma (doc-flags doc))
              (setf text (cdr text)))
-            
+
+            (:private
+             (push :private (doc-flags doc))
+             (if (line-text text) 
+                 (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc)))
+                 (setf text (cdr text))))
+                 
             ((:note :warn :code)
              (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
 
@@ -283,25 +266,31 @@
                 (setf text (get-doc-return/throw-subsection text doc #'doc-push-throw)))
             
             (:end
-             (setf text (cdr text)))
+             (if (line-text text) 
+                 (setf text (get-doc-chunk :md text (doc-get-ldoc doc)))    
+                 (setf text (cdr text))))
             
             (t
              (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
         (fixup-sdoc doc))))
 
 (defun create-doc (ast)
-  (setf (asn-doc ast) (create-*-doc (asn-comment ast) :variable #'map-object-pragmas)))
+  (setf (asn-doc ast) (create-*-doc (asn-comment ast) :variable)))
 
 (defun create-function-doc (ast ensure-doc-when-comment-exists)
-  (let ((doc (create-*-doc (asn-comment ast) :function #'map-function-pragmas)))
+  (let ((doc (create-*-doc (asn-comment ast) :function)))
     (if doc
-        (setf 
-         (doc-params doc) (get-doc-params (second (asn-children ast)) ensure-doc-when-comment-exists)
-         (asn-doc ast) doc))))
+        (progn
+          (if (not (eq (doc-type doc) :function)) 
+              (push :function (doc-flags doc)))
+          (setf 
+           (doc-params doc) (get-doc-params (second (asn-children ast)) ensure-doc-when-comment-exists)
+           (doc-location doc) (asn-location ast)
+           (asn-doc ast) doc)))))
 
 (defun process-return (ast current-doc)
   (if (and (gen-doc (asn-comment ast)) current-doc)
-      (do ((text (sift-pragmas (first (asn-comment ast)) #'map-parameter-pragmas)))
+      (do ((text (sift-pragmas (first (asn-comment ast)))))
           ((not text))
         (multiple-value-bind 
               (type section next) (get-doc-param-type-section text)
@@ -330,7 +319,7 @@ bombs out the regex
 
 |#
   (if (gen-doc (token-value raw-doc))
-      (let ((text (sift-pragmas (first (token-value raw-doc)) #'map-comment-pragmas))
+      (let ((text (sift-pragmas (first (token-value raw-doc))))
             doc)
         (if (eq (line-pragma text) :file)
             (setf doc (resource-doc resource)
@@ -344,9 +333,11 @@ bombs out the regex
             
             ((:todo :todoc :inote)
              (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
-            
+
             (:end
-             (setf text (cdr text)))
+             (if (line-text text) 
+                 (setf text (get-doc-chunk :md text (doc-get-ldoc doc)))    
+                 (setf text (cdr text))))
             
             (t
              (setf text (get-doc-chunk (or pragma :md) text (doc-get-ldoc doc))))))
@@ -355,18 +346,6 @@ bombs out the regex
 ;;
 ;; These are the special processing functions
 ;;
-
-(defun process-dojo-declare (arg-list)
-  (let ((class-name (token-value (asn-children (first arg-list))))
-        (supers (second arg-list))
-        (doc (asn-doc (third arg-list))))
-    (setf 
-     (doc-type doc) :class
-     (doc-members doc) (doc-properties doc)
-     (doc-properties doc) nil)
-    (if (eq (asn-type supers) :array)
-        (setf (doc-supers doc) (mapcar #'get-ast-name (asn-children supers))))
-    (values class-name doc)))
 
 (defun process-dojo-mixin (arg-list get-doc-item append-doc-item)
   (let* ((parent-name (get-ast-name (first arg-list)))
@@ -399,17 +378,39 @@ bombs out the regex
       (let ((doc (resource-doc resource)))
         (push (token-value (asn-children (first args))) (doc-requires doc)))))
 
+(defun process-dojo-declare (arg-list append-doc-item)
+  ;args is the list of argument expressions sent to dojo.declare
+  (let ((class-name (token-value (asn-children (first arg-list))))
+        (supers (second arg-list))
+        (doc (asn-doc (third arg-list))))
+    (setf 
+     (doc-type doc) :class
+     (doc-members doc) (doc-properties doc)
+     (doc-properties doc) nil)
+    (if (eq (asn-type supers) :array)
+        (setf (doc-supers doc) (mapcar #'get-ast-name (asn-children supers))))
+    (funcall append-doc-item class-name doc)))
+
 (defun process-bd-typedef (args append-doc-item)
   ;args is the list of argument expressions sent to bd.typedef; 
-  ;first of args is an object that gives a hash of types
-  (dolist (item (asn-children (first args)))
-    ;item is a cons (name . value), both name and value or ast's, name should be a string
-    (let* ((name (car item))
-           (value (cdr item))
-           (doc (or (asn-doc name) (asn-doc value))))
-      ;(format t "~A~%" value)
-      (setf (doc-type doc) :type)
-      (funcall append-doc-item (token-value (asn-children name)) doc))))
+  ;if args has length 2 then.
+  ;  first is a name prefix for the types defined by second
+  ;  second is an object that gives a hash of types
+  ;otherwise
+  ;  first of args is an object that gives a hash of types
+  (let (prefix object)
+    (if (eq (length args) 2) 
+        (setf prefix (concatenate 'string (token-value (asn-children (first args))) ".") object (second args))
+        (setf prefix "" object (first args)))
+    (dolist (item (asn-children object))
+      ;item is a cons (name . value), both name and value or ast's, name should be a string
+      (let* ((name (car item))
+             (value (cdr item))
+             (doc (or (asn-doc name) (asn-doc value))))
+        (if (eq (doc-type doc) :function) 
+            (push :function (doc-flags doc)))
+        (setf (doc-type doc) :type)
+        (funcall append-doc-item (concatenate 'string prefix (token-value (asn-children name))) doc)))))
 ;;
 ;; These functions decode an ast node
 ;;
@@ -423,6 +424,9 @@ bombs out the regex
                   "." 
                   (get-ast-name (cdr (asn-children ast)))))
     (t nil)))
+
+(defparameter kwargs
+  (cl-ppcre:create-scanner "\.kwargs$"))
 
 (defun doc-gen (resource append-doc-item get-doc-item)
   (setf (resource-doc resource) (funcall get-doc-item (resource-name resource) :resource t))
@@ -503,7 +507,7 @@ bombs out the regex
                   ;name is a token, expr is an expression or nil
                   (dolist (def (asn-children ast))
                     (if (and (gen-doc (lexical-var-comment def)) (eq (length doc-stack) 1))
-                        (funcall append-doc-item (token-value (lexical-var-name def)) (create-*-doc (lexical-var-comment def) :variable #'map-object-pragmas)))
+                        (funcall append-doc-item (token-value (lexical-var-name def)) (create-*-doc (lexical-var-comment def) :variable)))
 ;;TODO...DELETE                    (and (lexical-var-init-val def) (traverse (lexical-var-init-val def)))
 ))
 
@@ -639,6 +643,8 @@ bombs out the regex
                       (if (and name doc)
                           (progn
                             (setf (doc-location doc) (asn-location ast))
+                            (if (cl-ppcre:scan kwargs name)
+                                (setf (doc-type doc) :type))
                             (funcall append-doc-item name doc))))))
 
                  (:call
@@ -654,8 +660,7 @@ bombs out the regex
                       (traverse arg))
                     (cond
                       ((equal function-name "dojo.declare")
-                       (multiple-value-bind (class-name doc) (process-dojo-declare args)
-                         (funcall append-doc-item class-name doc)))
+                       (process-dojo-declare args append-doc-item))
                        
                       ((equal function-name "dojo.mixin")
                        (process-dojo-mixin args get-doc-item append-doc-item))
