@@ -12,7 +12,7 @@
 
 (defparameter *pragma-map*
   (let ((pragmas (make-hash-table :test 'equal)))
-    (dolist (word '(:mu :md :namespace :const :enum :type :variable :kwargs :hash :private :nosource :note :warn :code :return :throw :case :todo :todoc :inote :file))
+    (dolist (word '(:mu :md :namespace :const :enum :type :variable :kwargs :hash :private :nosource :note :warn :code :return :throw :case :todo :todoc :inote :file :require))
       (let ((word-string (string-downcase (string word))))
         (setf 
          (gethash word-string pragmas) word
@@ -330,6 +330,10 @@ bombs out the regex
           (case pragma
             ((:note :warn :code)
              (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
+
+            (:require
+             (doc-push-require doc (line-text text))
+             (setf text (cdr text)))
             
             ((:todo :todoc :inote)
              (setf text (get-doc-simple-subsection pragma text (doc-get-inotes doc))))
@@ -374,6 +378,7 @@ bombs out the regex
 (defun process-dojo-require (args resource)
   ;args is the list of argument expressions sent to dojo.require
   ;we only pay attention if it a :string asn
+  ;TODO need to make this better to handle a vector of requires
   (if (eq (asn-type (first args)) :string)
       (let ((doc (resource-doc resource)))
         (push (token-value (asn-children (first args))) (doc-requires doc)))))

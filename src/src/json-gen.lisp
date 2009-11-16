@@ -150,18 +150,34 @@
 
            (dump-name (name type)
              (case type
-               (:resource (concatenate 'string "\"resource." name "\""))
+               (:resource (concatenate 'string "\"resources." name "\""))
                (otherwise (quote-string name))))
 
            (dump-flags (flags)
              (if flags
                  (cat-prop-value "flags" (cat-array (map 'vector (lambda (flag) (format nil "s(\"~A_\")" (string-downcase flag))) flags)))))
 
+           (dump-imember (class-member)
+             (if class-member
+                 "imember:1"))
+
+           (dump-supers (supers) 
+             (if supers
+                 (cat-prop-value "supers" (cat-array (map 'vector (lambda (name) (quote-string name)) supers)))))
+
+           (dump-requires (requires)
+             (if requires
+                 (cat-prop-value "requires" (cat-array (map 'vector (lambda (name) (quote-string name)) requires)))))
+                 
+           (dump-require (requires)
+             (if requires
+                 (cat-prop-value "require" (cat-array (map 'vector (lambda (name) (quote-string name)) requires)))))
+                 
+
            (dump-doc-item (name item &optional (class-member nil))
              (let ((result (cat-prop-value "type" (dump-type (doc-type item)))))
                (setf result (cat-prop result (dump-sdoc (doc-sdoc item))))
-               (if class-member
-                   (setf result (cat-prop result "imember:1")))
+               (setf result (cat-prop result (dump-imember class-member)))
                (setf result (cat-prop result (dump-ldoc (doc-ldoc item))))
                (setf result (cat-prop result (dump-flags (doc-flags item))))
                (setf result (cat-prop result (dump-params (doc-params item))))
@@ -171,6 +187,9 @@
                (setf result (cat-prop result (dump-source-name (doc-source item))))
                (setf result (cat-prop result (dump-source-location (doc-location item))))
                (setf result (cat-prop result (dump-types (doc-types item))))
+               (setf result (cat-prop result (dump-supers (doc-supers item))))
+               (setf result (cat-prop result (dump-requires (doc-requires item))))
+               (setf result (cat-prop result (dump-require (doc-require item))))
                (if (eq (doc-type item) :resource)
                    (setf result (cat-prop result (dump-source (resource-text (doc-source item))))))
                (setf result (concatenate 'string lbrace-new-line-str result rbrace-new-line-str))
@@ -186,6 +205,3 @@
                    (setf result (concatenate 'string result "," (dump-doc-item (car name) item))))
                doc-items)
       (format stream "~A~%" (subseq result 1)))))
-
-
-

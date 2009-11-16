@@ -125,7 +125,8 @@
   flags      ;list of keywords
   sdoc       ;doc-section--short documentation
   ldoc       ;doc-section--long documentation
-  requires   ;vector of require items--the requirements/prerequisites to use this entity
+  requires   ;list of items a resource includes (e.g., like dojo.require of C/C++ #include)
+  require    ;list of items the user should include to gain access to the resource's contents
   provides   ;vector of provided items
   returns    ;vector of vector of (type . doc-section)
   throws     ;vector of rt-item--possible thrown values
@@ -162,9 +163,6 @@
       (progn (vector-push-extend item vector) vector)
       (make-array 1 :initial-contents (list item) :element-type (type-of item) :fill-pointer 1 :adjustable t)))
 
-(defun doc-push-require (doc item)
-  (setf (doc-requires doc) (doc-vector-push-item item (doc-requires doc))))
-
 (defun doc-push-param (doc item)
   (setf (doc-params doc) (doc-vector-push-item item (doc-params doc))))
 
@@ -184,3 +182,7 @@
     (:todoc "todoc")
     (:inote "inote")
     (t "markdown")))
+
+(defun doc-push-require (doc text)
+  (dolist (s (cl-ppcre:split "\\s+" (string-trim " " text)))
+    (push s (doc-require doc))))

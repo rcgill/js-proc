@@ -99,11 +99,12 @@
   (cons "/usr/home/rcgill/dev/backdraft/src/"
         (list "bd"
               "bd.frenzy"
+              "bd.command"
+              "bd.command.item"
 #|
               "bd.descriptor.processor"
               "bd.descriptor.cache"
               "bd.capture"
-              "bd.command"
               "bd.frenzy"
               "bd.parentSpace"
               "bd.delayProcManager"
