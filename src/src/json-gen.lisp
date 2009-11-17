@@ -146,7 +146,8 @@
                (cat-prop-value "code" (concatenate 'string "[" result "]"))))
 
            (dump-type (type) 
-             (format nil "s(\"~A_\")" (string-downcase type)))
+             (concatenate 'string "T" (string-downcase type)))
+             ;(format nil "s(\"~A_\")" (string-downcase type)))
 
            (dump-name (name type)
              (case type
@@ -155,7 +156,7 @@
 
            (dump-flags (flags)
              (if flags
-                 (cat-prop-value "flags" (cat-array (map 'vector (lambda (flag) (format nil "s(\"~A_\")" (string-downcase flag))) flags)))))
+                 (cat-prop-value "flags" (cat-array (map 'vector (lambda (flag) (concatenate 'string "F" (string-downcase flag))) flags)))))
 
            (dump-imember (class-member)
              (if class-member
