@@ -262,6 +262,11 @@
     tokens
     ))
 
+;; TODO
+;;
+;; Currently parsing fails sometimes if comments are left in the stream; 
+;; unfolded comments maybe should be removed?
+
 (defun fold-comments (tokens)
   (let* ((i -1)
          (token-count (length tokens))
@@ -269,7 +274,7 @@
          (last-non-comment-token-line -2))
     (labels 
         ((next () 
-           (aref tokens (incf i)))
+           (and (< (incf i) token-count) (aref tokens i)))
 
          (get-comment-count (start-line)
            (do* ((i (1+ i))
@@ -278,7 +283,7 @@
                 ((or (not (token-type-p token :comment)) (/= (token-line token) line)) (- line start-line)))))
 
       (do ((token (next) (next)))
-          ((= i token-count) result)
+          ((>= i token-count) result)
         (if (token-type-p token :comment)
             ;aggregate all the comments that are on contiguous lines into one value
             ;if they start on the same or next line as another type of token, then fold into that token

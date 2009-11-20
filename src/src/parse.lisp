@@ -68,8 +68,14 @@
 (defun skip (n)
   (dotimes (i n token) (next)))
 
-(defun get-token-and-advance ()
-  (prog1 token (next)))
+(defun eat-comments ()
+  (if (member (token-type token) '(:comment :block-comment))
+      (and (next) (eat-comments))))
+
+(defun get-token-and-advance (&optional (eat-comments nil))
+  (if (and eat-comments (member (token-type token) '(:comment :block-comment)))
+      (and (next) (get-token-and-advance t))
+      (prog1 token (next))))
 
 (defun token-error (token control &rest args)
   (let ((*line* (token-line token)) (*char* (token-char token)))
@@ -82,9 +88,12 @@
   (token-error token "Unexpected token '~a'." (token-id token)))
 
 (defun expect-token (type val)
-  (if (tokenp token type val)
-      (prog1 token (next))
-      (error* "Unexpected token '~a', expected '~a'." (token-id token) val)))
+  (let ((current-type (token-type token)))
+    (if (or (eq current-type :comment) (eq current-type :block-comment))
+        (and (next) (expect-token type val))
+        (if (tokenp token type val)
+            (prog1 token (next))
+            (error* "Unexpected token '~a', expected '~a'." (token-id token) val)))))
 
 (defun expect (punc)
   (expect-token :punc punc))
@@ -234,7 +243,7 @@
 (defun as-try (try-token body catch finally)
   (make-asn
    :type :try
-   :location (sum-locations try-token (or finally catch body))
+   :location (sum-locations try-token (or finally (cdr catch) body))
    :children (list body catch finally)))
 
 (defun as-expr-list (opening-token expr-list closing-token)
@@ -317,16 +326,17 @@
             (values nil nil))))))
 
 (defun vardefs ()
+  (eat-comments)
   (unless (token-type-p token :name) (unexpected token))
-  (let ((name (get-token-and-advance)) 
+  (let ((name (get-token-and-advance t)) 
         init-val
         comment)
     (when (tokenp token :operator :=)
-      (setf comment (token-comment (get-token-and-advance))
+      (setf comment (token-comment (get-token-and-advance t))
             init-val (expression nil)))
     (if (tokenp token :punc #\,)
         (progn 
-          (setf comment (or (token-comment (get-token-and-advance)) comment))
+          (setf comment (or (token-comment (get-token-and-advance t)) comment))
           (cons (make-lexical-var :name name :init-val init-val :comment comment) (vardefs)))
         (list (make-lexical-var :name name :init-val init-val :comment (or (and (tokenp token :punc #\;) (token-comment token)) comment))))))
 
@@ -515,7 +525,7 @@
     (when (tokenp token :keyword :catch)
       (next) (expect #\()
       (unless (token-type-p token :name) (error* "Name expected."))
-      (let ((name (token-value token)))
+      (let ((name token))
         (next) (expect #\))
         (setf catch (cons name (statement)))))
     (when (tokenp token :keyword :finally)
@@ -572,6 +582,7 @@
           (subscripts (as-new new-token new-expr args) t))))
 
 (defun expr-atom (allow-calls)
+  (eat-comments)
   (cond 
     ((tokenp token :operator :new)
      (new* token))
@@ -595,11 +606,14 @@
     (t (unexpected token))))
 
 (defun as-property-name ()
-  (if (member (token-type token) '(:num :string))
-      (let ((result (copy-token (get-token-and-advance))))
-        (setf (token-type result) :name)
-        (as-atom result))
-      (as-name)))
+  (let ((ttype (token-type token)))
+    (if (member ttype '(:comment :block-comment))
+        (and (next) (as-property-name))
+        (if (member (token-type token) '(:num :string))
+            (let ((result (copy-token (get-token-and-advance))))
+              (setf (token-type result) :name)
+              (as-atom result))
+            (as-name)))))
 
 (defun as-name ()
     (case (token-type token)

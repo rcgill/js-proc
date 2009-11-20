@@ -1,5 +1,4 @@
- 
-(in-package #:js-proc)
+ (in-package #:js-proc)
 
 (defun parse-js-string (string &optional strict-semicolons)
   (declare (ignore string))
@@ -20,6 +19,8 @@
   folded-tokens
   ast
   doc
+  (references (make-hash-table :test 'equal))
+  (requires (make-hash-table))
 )
 
 (defun get-resource-filename (path name)
@@ -49,15 +50,30 @@
 (defun make-doc-key (name type)
   (cons name type))
 
+(defun write-resource-header (resource)
+  (with-open-file (out (resource-filename resource) :direction :output :if-exists :supersede)
+    (format out "dojo.provide(\"~A\");~%" (resource-name resource))
+    (let ((requires (resource-requires resource)))
+      (maphash (lambda (key value)
+                 (declare (ignore value))
+                 (format out "dojo.require(\"~A\");~%" (resource-name key))) requires))
+    (format out "///file~%//~%~%")
+    (map nil (lambda (line) (format out "~A~%" line)) (resource-text resource))
+    (format out "// Copyright (c) 2000-2009, Altoviso, Inc. (www.altoviso.com). Use, modification, and distribution subject to terms of license.~%")))
+
 (defun process-batch (batch)
   (let ((resources (make-array 100 :element-type 'resource :fill-pointer 0))
-        (path (car batch)))
+        (path (car batch))
+        init-resource)
 
     (format t "reading...~%")
     (dolist (name (cdr batch))
       (let ((filename (get-resource-filename path name)))
         (format t "~I~A~%" name)
-        (vector-push (make-resource :name name :filename filename :text (read-source-filename filename)) resources)))
+        (let ((resource (make-resource :name name :filename filename :text (read-source-filename filename))))
+          (if (equal name "bd.init")
+              (setf init-resource resource))
+          (vector-push resource resources))))
 
     (format t "lexing...~%")
     (map nil (lambda (resource) (show-progress resource) (setf (resource-raw-tokens resource) (lex (resource-text resource)))) resources)
@@ -67,7 +83,7 @@
 
     (format t "parsing...~%")
     (map nil (lambda (resource) (show-progress resource) (setf (resource-ast resource) (parse-js (resource-folded-tokens resource)))) resources)
-
+#|
     (format t "traversing...~%")
     (map nil (lambda (resource) 
                (show-progress resource)
@@ -90,6 +106,33 @@
         (format out "~A~%" prefix)
         (dump-doc-items-to-json out *doc-items*)
         (format out "~A~%" suffix)))
+|#
+
+    (format t "dumping dependencies...~%")
+    (let ((defines (make-hash-table :test 'equal))
+          (not-found (make-hash-table :test 'equal)))
+      (map nil (lambda (resource) 
+                 (show-progress resource)
+                 (find-defines-and-references resource defines))
+           resources)
+      
+      (map nil (lambda (resource)
+                 (let ((requires (resource-requires resource)))
+                   (if (not (eq resource init-resource))
+                       (setf (gethash init-resource requires) t))
+                   (maphash (lambda (key value)
+                              (declare (ignore value))
+                              (let ((src (gethash key defines)))
+                                (if src
+                                    (setf (gethash src requires) t)
+                                    (setf (gethash key not-found) t))))
+                            (resource-references resource))
+                   (write-resource-header resource)))
+           resources)
+      (format t "the following symbols were not defined...")
+      (maphash (lambda (key value)
+                 (declare (ignore value))
+                 (format t "~A~%" key)) not-found))
 
     (format t "done...~%")
 
@@ -97,67 +140,10 @@
 
 (defun sources ()
   (cons "/usr/home/rcgill/dev/backdraft/src/"
-        (list "bd"
-              "bd.frenzy"
-              "bd.command"
-              "bd.command.item"
-#|
-              "bd.descriptor.processor"
-              "bd.descriptor.cache"
-              "bd.capture"
-              "bd.frenzy"
-              "bd.parentSpace"
-              "bd.delayProcManager"
-              "bd.namespace"
-              "bd.types"
-              "bd.data.lazyTreeStore"
-              "bd.data.lazyTreeModel"
-              "bd.data.dynaTreeModel"
-              "bd.data.rowset"
-              "bd.data.selector.ds.keyFilter"
-              "bd.data.selector.ds.simpleFilter"
-              "bd.data.selector.rs.simpleFilter"
-              "bd.dijit.statusbar"
-              "bd.dijit.pane"
-              "bd.dijit.vScrollbar"
-              "bd.dijit.scrollbar"
-              "bd.dijit.group"
-              "bd.dijit.staticText"
-              "bd.dijit.textbox"
-              "bd.dijit.radioGroup"
-              "bd.dijit.hScrollbar"
-              "bd.dijit.checkbox"
-              "bd.dijit.combobox"
-              "bd.dijit.root"
-              "bd.dijit.labeledWidget"
-              "bd.dijit.tree"
-              "bd.dijit.borderContainer"
-              "bd.dijit.tabContainer"
-              "bd.dijit.dialog"
-              "bd.dijit.listbox"
-              "bd.dijit.console"
-              "bd.dijit.contentPane"
-              "bd.dijit.dateTextbox"
-              "bd.dijit.button"
-              "bd.dijit.verticalSlider"
-              "bd.dijit.horizontalSlider"
-              "bd.dijit.mixin.core"
-              "bd.dijit.mixin.container"
-              "bd.dijit.mixin.navigator"
-              "bd.dijit.menu"
-              "bd.dijit.messagebox"
-              "bd.test.mockXhr"
-              "bd.test.matchers"
-              "bd.test.mockFrenzyServer"
-              "bd.test.moduleWrapper"
-              "bd.test.result"
-              "bd.test.space"
-              "bd.test.publisher"
-              "bd.test.loader"
-              "bd.test.proc"
-              "bd.resources.commandItems"
-|#
-              )))
+        ;(list "bd.symbols" "bd.init" "bd.collections" "bd.frenzy")
+;(list "bd.dijit.staticText")
+        (backdraft-sources)
+        ))
 
 (defun sourcesx ()
   (cons "/usr/home/rcgill/dev/js-proc/test/js-doc/"
@@ -170,3 +156,81 @@
   (process-batch (sources))
   nil
 )
+
+(defun backdraft-sources ()
+(let ((raw 
+"./bd/capture.js
+./bd/collections.js
+./bd/command/accelerators.js
+./bd/command/dispatch.js
+./bd/command/item.js
+./bd/command.js
+./bd/css.js
+./bd/data/dynaTreeModel.js
+./bd/data/lazyTreeModel.js
+./bd/data/rowset.js
+./bd/data/selector/ds/keyFilter.js
+./bd/data/selector/ds/simpleFilter.js
+./bd/data/selector/rs/simpleFilter.js
+./bd/delayProcManager.js
+./bd/descriptor/cache.js
+./bd/descriptor/processor.js
+./bd/dijit/borderContainer.js
+./bd/dijit/button.js
+./bd/dijit/checkbox.js
+./bd/dijit/combobox.js
+./bd/dijit/console.js
+./bd/dijit/contentPane.js
+./bd/dijit/dateTextbox.js
+./bd/dijit/dialog.js
+./bd/dijit/group.js
+./bd/dijit/horizontalSlider.js
+./bd/dijit/hScrollbar.js
+./bd/dijit/labeledWidget.js
+./bd/dijit/listbox.js
+./bd/dijit/menu.js
+./bd/dijit/messagebox.js
+./bd/dijit/mixin/container.js
+./bd/dijit/mixin/core.js
+./bd/dijit/mixin/navigator.js
+./bd/dijit/pane.js
+./bd/dijit/radioGroup.js
+./bd/dijit/root.js
+./bd/dijit/scrollbar.js
+./bd/dijit/staticText.js
+./bd/dijit/statusbar.js
+./bd/dijit/tabContainer.js
+./bd/dijit/textbox.js
+./bd/dijit/tree.js
+./bd/dijit/verticalSlider.js
+./bd/dijit/vScrollbar.js
+./bd/frenzy.js
+./bd/lang.js
+./bd/namespace.js
+./bd/parentSpace.js
+./bd/resources/commandItems.js
+./bd/test/loader.js
+./bd/test/matchers.js
+./bd/test/mockFrenzyServer.js
+./bd/test/mockXhr.js
+./bd/test/moduleWrapper.js
+./bd/test/proc.js
+./bd/test/publisher.js
+./bd/test/result.js
+./bd/test/space.js
+./bd/test.js
+./bd/types.js
+./bd/init.js
+./bd/start.js
+./bd/symbols.js
+./bd/loader.js"))
+  (setf raw (cl-ppcre:regex-replace-all "\\./" raw ""))
+  (setf raw (cl-ppcre:regex-replace-all "\\.js" raw ""))
+  (setf raw (cl-ppcre:regex-replace-all "/" raw "."))
+  (setf raw (cl-ppcre:split "\\n" raw))
+  (setf raw (remove "bd.test.moduleWrapper" raw :test 'equal))
+raw
+))
+;;TODO add files to ignore
+;;TODO don't delete dojo.requires from modules that are not part of the scan
+;;e.g., don'te delete dojo modules when only checking backdraft dependencies
