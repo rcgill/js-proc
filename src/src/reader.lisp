@@ -32,6 +32,9 @@
 ;		replace(/[\t]/g, "\\t").replace(/[\r]/g, "\\r"); // string
 
 
+;buildUtil.masterDependencyRegExpString = "dojo.(requireLocalization|require|requireIf|provide|requireAfterIf|platformRequire|i18n\._preloadLocalizations)\\s*\\(([\\w\\W]*?)\\)";
+
+
 (defparameter step1
   (cl-ppcre:create-scanner "(\"|\\\\)"))
 (defparameter step2
@@ -43,28 +46,97 @@
 (defparameter step5
   (cl-ppcre:create-scanner "\\r"))
 
-(defun make-batch (list) 
-  (let ((buffer (make-string 100000)))
-    (with-open-file (dest "/usr/home/rcgill/dev/dojo/working/bulk.js" :direction :output :if-exists :supersede :element-type 'extended-char)
-      (write-string "fileCache= {" dest)
-      (let ((first t))
-        (dolist (filename list)
-          (with-open-file (src (concatenate 'string "/usr/home/rcgill/dev/backdraft" filename) :element-type 'extended-char)
-            ;(format t "~A~%" filename)
-            (let ((length (read-sequence buffer src)))
-              (let ((s (cl-ppcre:regex-replace-all step1 buffer "\\\\\\1" :start 0 :end length)))
-                (setf s (cl-ppcre:regex-replace-all step2 s "\\t"))
-                (setf s (cl-ppcre:regex-replace-all step3 s "\\f"))
-                (setf s (cl-ppcre:regex-replace-all step4 s "\\n"))
-                (setf s (cl-ppcre:regex-replace-all step5 s "\\r"))
-                (if first
-                    (setf first nil)
-                    (format dest ","))
-                (format dest "~%\"~A\": \"" filename)
-                (write-sequence s dest)
-                (format dest "\""))))))
-      (format dest "~%};"))))
+(defparameter dojo-provide
+  (cl-ppcre:create-scanner "dojo\\.provide\\(\"([\\w\\.]*?)\"\\);.*\\n"))
 
+(defparameter dojo-require
+  (cl-ppcre:create-scanner "dojo\\.require\\(\\s*\"([\\w\\_\\.]*?)\"\\s*\\);.*\\n"))
+
+(defparameter not-ascii-scanner
+  (cl-ppcre:create-scanner "[^\\x00-\\x7f]"))
+
+(defun write-bulk-resource (filename dest) 
+  (let ((buffer (make-string 100000)))
+    (with-open-file (src filename :element-type 'extended-char)
+      (let* ((length (read-sequence buffer src))
+             (buffer (subseq buffer 0 length)))
+        (when (not (cl-ppcre:scan not-ascii-scanner buffer))
+          (let ((buffer (cl-ppcre:regex-replace-all step1 buffer "\\\\\\1")))
+            (setf buffer (cl-ppcre:regex-replace-all step2 buffer "\\t"))
+            (setf buffer (cl-ppcre:regex-replace-all step3 buffer "\\f"))
+            (setf buffer (cl-ppcre:regex-replace-all step4 buffer "\\n"))
+            (setf buffer (cl-ppcre:regex-replace-all step5 buffer "\\r"))
+            (format dest ",~%\"~A\":\"~A\"" filename buffer)))))))
+
+(defun write-bulk-resources (filename list) 
+  (with-open-file (dest filename :direction :output :if-exists :supersede :element-type 'extended-char)
+    (format dest "var avBulkResources= {junk:\"\"")
+    (dolist (item list)
+      (write-bulk-resource item dest))
+    (format dest "};~%")))
+
+(defun create-bulk-resources (roots)
+  (let ((files nil))
+    (dolist (root roots files)
+      (setf files (append files (cl-ppcre:split "\\n"
+                                        (with-output-to-string (out) (sb-ext:run-program "/bin/sh" (list "-c" (concatenate 'string "find " root " -name \"*.js\"")) :wait t :output out)))))
+      (setf files (append files (cl-ppcre:split "\\n"
+                                        (with-output-to-string (out) (sb-ext:run-program "/bin/sh" (list "-c" (concatenate 'string "find " root " -name \"*.html\"")) :wait t :output out))))))
+    (write-bulk-resources "/usr/home/rcgill/dev/docder/src/bulk.js" files)))
+
+(defun check ()
+  (create-bulk-resources '("/usr/home/rcgill/dev/docder/src/dojo/"
+                           "/usr/home/rcgill/dev/docder/src/dijit/"
+                           "/usr/home/rcgill/dev/docder/src/bd/"
+                          ; "/usr/home/rcgill/dev/docder/src/docder/"
+)))
+
+
+(defun write-loader-source (filename buffer moduleName requires)
+  (with-open-file (dest (concatenate 'string filename ".avloader") :direction :output :if-exists :supersede :element-type 'extended-char)
+    (format dest "bd.loader.put(\"~A\", [" moduleName)
+    (when requires
+      (format dest "\"~A\"" (car requires))
+      (dolist (item (cdr requires))
+        (format dest ",\"~A\"" item)))
+    (format dest "], function() {~%~A~%});" buffer)))
+      
+(defun create-av-loader-source (filename)
+  (let ((buffer (make-string 100000)))
+    (with-open-file (src filename :element-type 'extended-char)
+      (let* ((length (read-sequence buffer src))
+             (buffer (subseq buffer 0 length)))
+        (if (not (cl-ppcre:scan not-ascii-scanner buffer))
+            (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings dojo-provide buffer)
+              (if match
+                  (let ((moduleName (aref match-strings 0))
+                        (requires nil))
+                    (cl-ppcre:do-register-groups (require-module-name)
+                        (dojo-require buffer)
+                      (push require-module-name requires))
+                    (write-loader-source filename buffer moduleName (reverse requires))))))))))
+
+(defun get-js-list (path)
+  (cl-ppcre:split "\\n"
+   (with-output-to-string (out) (sb-ext:run-program "/bin/sh" (list "-c" (concatenate 'string "find " path " -name \"*.js\"")) :wait t :output out))))
+
+(defun create-av-loader-sources (root-list)
+  (dolist (root root-list)
+    (format t "~A~%" root)
+    (dolist (filename (get-js-list root))
+      (create-av-loader-source filename))))
+#|
+(defun check ()
+  (dolist (filename (get-js-list "/home/rcgill/dev/docder/src/dijit/"))
+    (check-for-provide filename)))
+|#
+
+(defun create-av-loader-sources-for-docder ()
+  (create-av-loader-sources '(
+                              "/home/rcgill/dev/docder/src/bd/"
+                              "/home/rcgill/dev/docder/src/docder/"
+                              "/home/rcgill/dev/docder/src/dojo/"
+                              "/home/rcgill/dev/docder/src/dijit/")))
 
 "dojo._base._loader.bootstrap.js"
 "dojo._base._loader.loader.js"
