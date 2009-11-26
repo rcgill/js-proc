@@ -55,6 +55,9 @@
 (defparameter not-ascii-scanner
   (cl-ppcre:create-scanner "[^\\x00-\\x7f]"))
 
+(defparameter fslash
+  (cl-ppcre:create-scanner "/"))
+
 (defun write-bulk-resource (filename dest) 
   (let ((buffer (make-string 100000)))
     (with-open-file (src filename :element-type 'extended-char)
@@ -66,7 +69,7 @@
             (setf buffer (cl-ppcre:regex-replace-all step3 buffer "\\f"))
             (setf buffer (cl-ppcre:regex-replace-all step4 buffer "\\n"))
             (setf buffer (cl-ppcre:regex-replace-all step5 buffer "\\r"))
-            (format dest ",~%\"~A\":\"~A\"" filename buffer)))))))
+            (format dest ",~%\"~A\":\"~A\"" (cl-ppcre:regex-replace-all fslash filename ".") buffer)))))))
 
 (defun write-bulk-resources (filename list) 
   (with-open-file (dest filename :direction :output :if-exists :supersede :element-type 'extended-char)
@@ -82,39 +85,40 @@
                                         (with-output-to-string (out) (sb-ext:run-program "/bin/sh" (list "-c" (concatenate 'string "find " root " -name \"*.js\"")) :wait t :output out)))))
       (setf files (append files (cl-ppcre:split "\\n"
                                         (with-output-to-string (out) (sb-ext:run-program "/bin/sh" (list "-c" (concatenate 'string "find " root " -name \"*.html\"")) :wait t :output out))))))
-    (write-bulk-resources "/usr/home/rcgill/dev/docder/src/bulk.js" files)))
+    ;(write-bulk-resources "/usr/home/rcgill/dev/docder/src/bulk.js" files)))
+    (format t "~A~%" files)))
 
 (defun check ()
   (create-bulk-resources '("/usr/home/rcgill/dev/docder/src/dojo/"
                            "/usr/home/rcgill/dev/docder/src/dijit/"
-                           "/usr/home/rcgill/dev/docder/src/bd/"
+                          ; "/usr/home/rcgill/dev/docder/src/bd/"
                           ; "/usr/home/rcgill/dev/docder/src/docder/"
 )))
 
 
 (defun write-loader-source (filename buffer moduleName requires)
-  (with-open-file (dest (concatenate 'string filename ".avloader") :direction :output :if-exists :supersede :element-type 'extended-char)
+  (with-open-file (dest (concatenate 'string filename) :direction :output :if-exists :supersede :element-type 'extended-char)
     (format dest "bd.loader.put(\"~A\", [" moduleName)
     (when requires
-      (format dest "\"~A\"" (car requires))
+      (format dest "~%  \"~A\"" (car requires))
       (dolist (item (cdr requires))
-        (format dest ",\"~A\"" item)))
-    (format dest "], function() {~%~A~%});" buffer)))
+        (format dest ",~%  \"~A\"" item)))
+    (format dest "~%], function() {~%~A~%" buffer)))
       
 (defun create-av-loader-source (filename)
   (let ((buffer (make-string 100000)))
     (with-open-file (src filename :element-type 'extended-char)
-      (let* ((length (read-sequence buffer src))
-             (buffer (subseq buffer 0 length)))
-        (if (not (cl-ppcre:scan not-ascii-scanner buffer))
-            (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings dojo-provide buffer)
-              (if match
-                  (let ((moduleName (aref match-strings 0))
-                        (requires nil))
-                    (cl-ppcre:do-register-groups (require-module-name)
-                        (dojo-require buffer)
-                      (push require-module-name requires))
-                    (write-loader-source filename buffer moduleName (reverse requires))))))))))
+      (let ((length (read-sequence buffer src)))
+        (setf buffer (subseq buffer 0 length))))
+    (if (not (cl-ppcre:scan not-ascii-scanner buffer))
+        (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings dojo-provide buffer)
+          (if match
+              (let ((moduleName (aref match-strings 0))
+                    (requires nil))
+                (cl-ppcre:do-register-groups (require-module-name)
+                    (dojo-require buffer)
+                  (push require-module-name requires))
+                (write-loader-source filename buffer moduleName (reverse requires))))))))
 
 (defun get-js-list (path)
   (cl-ppcre:split "\\n"
@@ -135,8 +139,9 @@
   (create-av-loader-sources '(
                               "/home/rcgill/dev/docder/src/bd/"
                               "/home/rcgill/dev/docder/src/docder/"
-                              "/home/rcgill/dev/docder/src/dojo/"
-                              "/home/rcgill/dev/docder/src/dijit/")))
+)))
+   ;                           "/home/rcgill/dev/docder/src/dojo/"
+   ;                           "/home/rcgill/dev/docder/src/dijit/")))
 
 "dojo._base._loader.bootstrap.js"
 "dojo._base._loader.loader.js"
@@ -497,3 +502,66 @@
 /dojo/dojo/./cldr/nls/en/gregorian.js
 /dojo/dojo/./cldr/nls/en-us/gregorian.js
 |#
+
+
+(defun append-resource(filename dest)
+  (let ((buffer (make-string 100000)))
+    (with-open-file (src filename :element-type 'extended-char)
+      (let ((length (read-sequence buffer src)))
+        (format dest "~%~%//~A~%~A~%" filename (subseq buffer 0 length))))))
+
+(defparameter dot
+  (cl-ppcre:create-scanner "\\."))
+
+(defun do-build (root filelist dest-filename)
+  (with-open-file (dest dest-filename :direction :output :if-exists :supersede :element-type 'extended-char)
+    (append-resource "/usr/home/rcgill/dev/backdraft/src/bd/init.js" dest)
+    (format dest "bd.beginMassLoad();~%")
+    (dolist (module filelist)
+      (append-resource (concatenate 'string root (cl-ppcre:regex-replace-all dot module "/") ".js") dest))
+    (format dest "bd.endMassLoad(\"docder.main\");~%")))
+
+
+;(do-docder-build "/usr/home/rcgill/dev/docder/src/" build-list "/usr/home/rcgill/dev/docder/release/docder/main.js")
+
+(defparameter build-list '(
+"docder.main"
+"docder.pageTypes.generic"
+"docder.pageTypes.document"
+"docder.pageTypes.catalogPage"
+"docder.showdown"
+"docder.paneManager"
+"docder.search"
+"docder.command"
+"docder.util"
+"docder.docManager"
+"bd.dijit.statusbar"
+"bd.dijit.borderContainer"
+"bd.dijit.root"
+"bd.dijit.tree"
+"bd.dijit.mixin.navigator"
+"bd.dijit.messagebox"
+"bd.dijit.menu"
+"bd.commandPackage"
+"bd.commonPackage"
+"bd.dijit.pane"
+"bd.descriptor.processor"
+"bd.dijit.staticText"
+"bd.resources.commandItems"
+"bd.delayProcManager"
+"bd.parentSpace"
+"bd.dijit.mixin.container"
+"bd.dijit.mixin.core"
+"bd.capture"
+"bd.css"
+"bd.dijit.button"
+"bd.command.accelerators"
+"bd.command.dispatch"
+"bd.command.item"
+"bd.command"
+"bd.start"
+"bd.namespace"
+"bd.symbols"
+"bd.lang"
+"bd.collections"
+"bd.dom"))
