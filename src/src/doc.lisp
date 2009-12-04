@@ -20,7 +20,7 @@
          (end (do ((i (1- line-count) (decf i)))
                   ((or (<= i start) (aref text i))
                    i))))
-    ;start/end or the first/last non-blank lines   
+    ;start/end are the first/last non-blank lines   
     (if (= start line-count)
         ""
         (let ((min-spaces (do ((min-spaces 10000) ;10K is arbitrary (assuming no line is more than 10K chars!)
@@ -28,10 +28,10 @@
                               ((or (> i end) (zerop min-spaces))
                                min-spaces)
                             (let* ((s (aref text i))
-                                   (s-length (length s)))
+                                   (first-nonblank (and (plusp (length s)) (position-if #'not-space-p s))))
                               ;ignore blank lines
-                              (if (> s-length 0)
-                                  (setf min-spaces (min min-spaces (position-if #'not-space-p s))))))))
+                              (if first-nonblank
+                                  (setf min-spaces (min min-spaces first-nonblank)))))))
           (do* ((i (1+ start) (incf i))
                (acc (subseq (aref text start) min-spaces)))
               ((> i end)

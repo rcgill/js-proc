@@ -85,7 +85,8 @@
 
   (def token (type value)
     (setf regex-allowed
-          (or (eq type :operator)
+          (or (eq type :comment)
+              (eq type :operator)
               (and (eq type :keyword)
                    (member value *keywords-before-expression*))
               (and (eq type :punc)

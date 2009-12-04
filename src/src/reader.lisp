@@ -522,7 +522,7 @@
     (format dest "bd.endMassLoad(\"docder.main\");~%")))
 
 
-;(do-docder-build "/usr/home/rcgill/dev/docder/src/" build-list "/usr/home/rcgill/dev/docder/release/docder/main.js")
+;(do-build "/usr/home/rcgill/dev/docder/src/" build-list "/usr/home/rcgill/dev/docder/release/docder/main.js")
 
 (defparameter build-list '(
 "docder.main"

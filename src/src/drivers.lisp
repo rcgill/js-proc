@@ -83,7 +83,7 @@
 
     (format t "parsing...~%")
     (map nil (lambda (resource) (show-progress resource) (setf (resource-ast resource) (parse-js (resource-folded-tokens resource)))) resources)
-#|
+
     (format t "traversing...~%")
     (map nil (lambda (resource) 
                (show-progress resource)
@@ -106,8 +106,8 @@
         (format out "~A~%" prefix)
         (dump-doc-items-to-json out *doc-items*)
         (format out "~A~%" suffix)))
-|#
 
+#|
     (format t "dumping dependencies...~%")
     (let ((defines (make-hash-table :test 'equal))
           (not-found (make-hash-table :test 'equal)))
@@ -133,16 +133,17 @@
       (maphash (lambda (key value)
                  (declare (ignore value))
                  (format t "~A~%" key)) not-found))
-
+|#
     (format t "done...~%")
 
     resources))
 
 (defun sources ()
   (cons "/usr/home/rcgill/dev/backdraft/src/"
+        '("bd.init")
         ;(list "bd.symbols" "bd.init" "bd.collections" "bd.frenzy")
 ;(list "bd.dijit.staticText")
-        (backdraft-sources)
+        ;(backdraft-sources)
         ))
 
 (defun sourcesx ()

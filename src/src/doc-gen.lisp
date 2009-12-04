@@ -53,12 +53,17 @@
 (defparameter pragma-scanner 
   ; ^((//)(\\s*`)?|(\\s*`))  start of line followed by "//" or "//<spaces>`" or "<spaces>`"
   ; ([^\\s\\(]+)? -- the pragma; one or more of anything other than a space or left parentheses
+  
   ; (\\([^\\)]*\\))? -- the pragma arguments; anything other than a right parentheses enclosed in parentheses.
-  ; (\\s+(.*))? everything after the pragma; must have at least one space after the pragma
+  ; (\\((.*))? -- the pragma arguments; anything other than a right parentheses enclosed in parentheses.
+  
+   ; (\\s+(.*))? everything after the pragma; must have at least one space after the pragma
   ;
   ; notice that it is possible to match with both nil pragma and pragma arguments (e.g., "// the rest")
   ; therefore, a match is known when match is true and one or both of the pragma/pragma arguments is non-nil
-  (cl-ppcre:create-scanner "^((//)(\\s*`)?|(\\s*`))([^\\s\\(]+)?(\\(([^\\)]*)\\))?(\\s+.*)?"))
+  ;(cl-ppcre:create-scanner "^((//)(\\s*`)?|(\\s*`))([^\\s\\(]+)?(\\(([^\\)]*)\\))?(\\s+.*)?"))
+  ;;                          01   2        3       4            5   6             7    
+  (cl-ppcre:create-scanner "^((//)(\\s*`)?|(\\s*`))([^\\s\\(]+)?(\\((.*))?(\\s+.*)?"))
   ;                          01   2        3       4            5   6             7    
 
 (defparameter //-comment-scanner 
@@ -66,6 +71,25 @@
 
 (defparameter non-space-scanner 
   (cl-ppcre:create-scanner "\\S"))
+
+(defun get-args (args rest-of-line)
+  (if args
+      (let* ((left-parent-count 1)
+             (length-of-args (do ((i 0))
+                                 ((or (>= i (length args)) (zerop left-parent-count)) i)
+                               (case (char args i)
+                                 (#\) (decf left-parent-count))
+                                 (#\( (incf left-parent-count)))
+                               (if (plusp left-parent-count)
+                                   (incf i)))))
+        (if (zerop left-parent-count)
+            (values 
+             (subseq args 0 length-of-args) 
+             (if (eql (1+ length-of-args) (length args)) 
+               nil
+               (string-trim '(#\Space #\Tab) (subseq args (1+ length-of-args)))))
+            (values nil args)))
+      (values nil rest-of-line)))
 
 (defun sift-pragmas (text)
   ; map text to a list of sifted-lines
@@ -75,19 +99,15 @@
   (map 'list 
        (lambda (s)
          (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings pragma-scanner s)
-           (let* ((pragma (and match (check-pragma (aref match-strings 4) (aref match-strings 6))))
-                  (rest-of-line (and pragma (aref match-strings 7) (string-right-trim '(#\Space #\Tab) (aref match-strings 7))))
-                  (spaces (and rest-of-line (make-string (do ;the sum of the lengths of match-strings 2, 3, 4, 5
-                                                          ((sum 0)
-                                                           (i 2 (incf i)))
-                                                          ((> i 5)
-                                                           sum)
-                                                           (setf sum (+ sum (length (aref match-strings i))))) :initial-element #\space))))
-             (if pragma
-                 (make-sifted-line :pragma pragma :args (aref match-strings 6) :text (and (plusp (length rest-of-line)) (concatenate 'string spaces rest-of-line)))
-                 (let ((s (cl-ppcre:regex-replace //-comment-scanner s "")))
-                     (make-sifted-line :text (and (cl-ppcre:scan non-space-scanner s) (string-right-trim '(#\Space #\Tab) s))))))))
-             text))
+           ;(let* ((pragma (and match (check-pragma (aref match-strings 4) (aref match-strings 6))))
+           ;       (rest-of-line (and pragma (aref match-strings 7) (string-right-trim '(#\Space #\Tab) (aref match-strings 7))))
+           (multiple-value-bind (args rest-of-line) (get-args (aref match-strings 6) (aref match-strings 7))
+             (let ((pragma (and match (check-pragma (aref match-strings 4) args))))
+               (if pragma
+                   (make-sifted-line :pragma pragma :args args :text (and (plusp (length rest-of-line)) rest-of-line))
+                   (let ((s (cl-ppcre:regex-replace //-comment-scanner s "")))
+                     (make-sifted-line :text (and (cl-ppcre:scan non-space-scanner s) (string-right-trim '(#\Space #\Tab) s)))))))))
+         text))
  
 (defun line-pragma (line)
   (and line (sifted-line-pragma (car line))))
@@ -631,12 +651,15 @@ bombs out the regex
                     (dolist (property (asn-children ast))
                       (let ((property-name (car property))
                             (property-value (cdr property)))
-                        (if mark-doc
-                            (progn
-                              (ensure-doc-when-comment-exists (asn-comment property-name))
-                              (ensure-doc-when-comment-exists (asn-comment property-value))))
-                      (create-doc (car property))
-                      (traverse (cdr property)))))
+                        (when mark-doc
+                          (ensure-doc-when-comment-exists (asn-comment property-name))
+                          (ensure-doc-when-comment-exists (asn-comment property-value)))
+                        (create-doc property-name)
+                        (traverse (cdr property))
+                        (when (asn-doc property-name)
+                          (setf (doc-location (asn-doc property-name)) (asn-location property-value)))
+                        (when (asn-doc property-value)
+                          (setf (doc-location (asn-doc property-value)) (asn-location property-value))))))
                   (if (asn-doc ast)
                       (setf (doc-location (asn-doc ast)) (asn-location ast)
                             (doc-properties (asn-doc ast)) (asn-children ast))))
