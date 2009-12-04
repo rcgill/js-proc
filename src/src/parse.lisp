@@ -642,7 +642,7 @@
      (let ((opening (get-token-and-advance))
            (args (expr-list #\)))
            (closing (get-token-and-advance)))
-       (subscripts (as-binary-op expr :call args (sum-locations opening closing)) t)))
+       (subscripts (as-binary-op expr :call args (sum-locations expr closing)) t)))
     
     ((and (unary-postfix-p token) allow-calls)
      (as-unary-postfix (get-token-and-advance) expr))

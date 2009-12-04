@@ -416,8 +416,8 @@ bombs out the regex
         (setf (doc-supers doc) (mapcar #'get-ast-name (asn-children supers))))
     (funcall append-doc-item class-name doc)))
 
-(defun process-bd-typedef (args append-doc-item)
-  ;args is the list of argument expressions sent to bd.typedef; 
+(defun process-bd-docDef (args append-doc-item)
+  ;args is the list of argument expressions sent to bd.docDef; 
   ;if args has length 2 then.
   ;  first is a name prefix for the types defined by second
   ;  second is an object that gives a hash of types
@@ -434,7 +434,7 @@ bombs out the regex
              (doc (or (asn-doc name) (asn-doc value))))
         (if (eq (doc-type doc) :function) 
             (push :function (doc-flags doc)))
-        (setf (doc-type doc) :type)
+       ; (setf (doc-type doc) :type)
         (funcall append-doc-item (concatenate 'string prefix (token-value (asn-children name))) doc)))))
 ;;
 ;; These functions decode an ast node
@@ -709,8 +709,8 @@ bombs out the regex
                       ((equal function-name "dojo.require")
                        (process-dojo-require args resource))
 
-                      ((equal function-name "bd.typedef")
-                       (process-bd-typedef args append-doc-item))
+                      ((equal function-name "bd.docDef")
+                       (process-bd-docDef args append-doc-item))
 
                       )))
                  
