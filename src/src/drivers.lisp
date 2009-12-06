@@ -140,7 +140,11 @@
 
 (defun sources ()
   (cons "/usr/home/rcgill/dev/backdraft/src/"
-        '("bd.init")
+        '(
+           "bd.init"
+           "bd.start"
+           "bd.collections"
+          )
         ;(list "bd.symbols" "bd.init" "bd.collections" "bd.frenzy")
 ;(list "bd.dijit.staticText")
         ;(backdraft-sources)
