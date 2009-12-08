@@ -403,17 +403,25 @@ bombs out the regex
       (let ((doc (resource-doc resource)))
         (push (token-value (asn-children (first args))) (doc-requires doc)))))
 
-(defun process-dojo-declare (arg-list append-doc-item)
+(defun process-dojo-declare (loc arg-list append-doc-item)
   ;args is the list of argument expressions sent to dojo.declare
   (let ((class-name (token-value (asn-children (first arg-list))))
         (supers (second arg-list))
         (doc (asn-doc (third arg-list))))
     (setf 
      (doc-type doc) :class
+     (doc-location doc) loc
      (doc-members doc) (doc-properties doc)
      (doc-properties doc) nil)
-    (if (eq (asn-type supers) :array)
-        (setf (doc-supers doc) (mapcar #'get-ast-name (asn-children supers))))
+
+    (case (asn-type supers)
+      (:array 
+       (setf (doc-supers doc) (mapcar #'get-ast-name (asn-children supers))))
+      ((:name :dot)
+        (setf (doc-supers doc) (cons (get-ast-name supers) nil)))
+      (t
+       (setf (doc-supers doc) nil)))
+
     (funcall append-doc-item class-name doc)))
 
 (defun process-bd-docDef (args append-doc-item)
@@ -615,9 +623,8 @@ bombs out the regex
                          (body (first children))
                          (catch (second children))
                          (finally (third children)))
-                    (dolist (statement body)
-                      (traverse statement))
-                    (and catch (traverse catch))
+                    (traverse body)
+                    (and catch (traverse (cdr catch)))
                     (and finally (traverse finally))))
 
                  (:expr-list
@@ -698,7 +705,7 @@ bombs out the regex
                       (traverse arg))
                     (cond
                       ((equal function-name "dojo.declare")
-                       (process-dojo-declare args append-doc-item))
+                       (process-dojo-declare (asn-location ast) args append-doc-item))
                        
                       ((equal function-name "dojo.mixin")
                        (process-dojo-mixin args get-doc-item append-doc-item))

@@ -144,6 +144,20 @@
            "bd.init"
            "bd.start"
            "bd.collections"
+           "bd.capture"
+           "bd.command"
+           "bd.commandPackage"
+           "bd.commonPackage"
+           "bd.css"
+           "bd.dom"
+           "bd.delayProcManager"
+           "bd.frenzy"
+           "bd.symbols"
+           "bd.lang"
+           "bd.namespace"
+           "bd.parentSpace"
+           "bd.test"
+           "bd.test.proc"
           )
         ;(list "bd.symbols" "bd.init" "bd.collections" "bd.frenzy")
 ;(list "bd.dijit.staticText")

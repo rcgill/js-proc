@@ -197,7 +197,9 @@
                (if name
                  (setf result (concatenate 'string (dump-name name (doc-type item)) ":" result)))
                (map nil (lambda (member)
-                          (setf result (concatenate 'string result "," (dump-member name member)))) (doc-members item))
+                          (let ((doc-string (dump-member name member)))
+                            (if doc-string
+                                (setf result (concatenate 'string result "," doc-string))))) (doc-members item))
                result))
            )
     
