@@ -66,6 +66,10 @@
   (cl-ppcre:create-scanner "^((//)(\\s*`)?|(\\s*`))([^\\s\\(]+)?(\\((.*))?(\\s+.*)?"))
   ;                          01   2        3       4            5   6             7    
 
+
+(defparameter include-scanner
+  (cl-ppcre:create-scanner "^\\s*//include\\s+(.+)"))
+
 (defparameter //-comment-scanner 
   (cl-ppcre:create-scanner "^//"))
 
