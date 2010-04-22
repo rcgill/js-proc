@@ -236,6 +236,47 @@
           (funcall ensure-doc-when-comment-exists (cdr p))
           (vector-push-extend (get-doc-param (car p) (first (cdr p))) params)))))
 
+  #|
+(defun get-overload (text)
+  text must have lines like:
+  // (a1, a2, ..., an)
+  // a1: (type) asdlkj asldkjf
+  // a1: (type) asdlkj asldkjf
+  //
+  // <description>
+  (let ((overload (string-trim '(#\Space #\Tab) (line-text text)))
+        (params (make-doc-params))
+        (description (make-doc-section)))
+        (p (cdr text))
+    (do ((done nil))
+        (done (values overload description params p))
+      (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings overload-parameter-type-scanner (line-text p))
+        (cond
+          (match
+              (let ((name (aref match-strings 1))
+                    (raw-doc (list (concatenate 'string "//" (aref match-strings 2)))))
+                (do ((done nil))
+                    (done (vector-push-extend (get-doc-param name raw-doc) params))
+                  (if (and (not (cl-ppcre:scan overload-parameter-type-scanner (line-text p))) (line-text p))
+                      (progn (push raw-doc (concatenate 'string "//" (line-text p))) (setf p (cdr p)))
+                      (setf done t)))))
+          ((not (line-text p))
+           (setf p (cdr p))
+           (do ()
+               (done)
+             (case (line-pragma p) 
+               ((:note :warn :code :todo :todoc :inote)
+                (setf p (get-doc-simple-subsection pragma p description)))
+
+               (:end
+                (if (line-text text) 
+                    (setf p (get-doc-chunk :md text description))    
+                    (setf p (cdr p) done t)))
+                 
+               (t
+                (setf p (get-doc-chunk (or pragma :md) p description)))))))))))
+  |#
+
 (defun gen-doc (comment)
   (cond
     ((not comment) nil)
@@ -407,6 +448,19 @@ bombs out the regex
       (let ((doc (resource-doc resource)))
         (push (token-value (asn-children (first args))) (doc-requires doc)))))
 
+(defun process-dojo-def (args resource loc append-doc-item)
+  ;args is the list of argument expressions sent to dojo.def
+  ;we only pay attention if it the first argument is a :string
+  (if (eq (asn-type (first args)) :string)
+      (let ((name (token-value (asn-children (first args))))
+            (doc (asn-doc (or (third args) (second args)))))
+        (push :module (doc-flags doc))
+        (setf 
+         (doc-location doc) loc
+         (doc-type doc) :module)
+        (funcall append-doc-item name doc)
+        (push name (doc-modules (resource-doc resource))))))
+
 (defun process-dojo-declare (loc arg-list append-doc-item)
   ;args is the list of argument expressions sent to dojo.declare
   (let ((class-name (token-value (asn-children (first arg-list))))
@@ -428,8 +482,67 @@ bombs out the regex
 
     (funcall append-doc-item class-name doc)))
 
-(defun process-bd-docDef (args append-doc-item)
-  ;args is the list of argument expressions sent to bd.docDef; 
+(defun process-bd-doc-group-overload (args doc)
+  (do ((result nil)
+       (p args (cdr p)))
+      ((or (not p) (not (eq (asn-type (first p)) :function-literal))) 
+       (setf (doc-overloads doc) (reverse result))
+       p)
+    (push (asn-doc (first p)) result)))
+  
+(defun process-bd-doc-group-prefix (prefix object append-doc-item)
+  (dolist (item (asn-children object))
+    ;item is a cons (name . value)
+    (let* ((name (car item))
+           (value (cdr item))
+           (doc (or (asn-doc name) (asn-doc value))))
+      (if (eq (doc-type doc) :function) 
+          (push :function (doc-flags doc)))
+      (funcall append-doc-item (concatenate 'string prefix (token-value (asn-children name))) doc))))
+
+(defun process-bd-doc (args append-doc-item bd-doc-asn)
+  ;args is the list of argument expressions sent to bd.doc
+  ;the expressions come in one or more groups of:
+
+  ; "overload", <function-literal>+
+  ; appears as first expression in function and gives possible overload signatures for function.
+  ; this will be processed by the function doc generator
+
+  ; "kwargs", <object-literal>
+  ; appears as first expression in function and gives kwargs for function
+
+  ; "<any non-empty-string>", <object-literal>
+  ; appears anywhere, defined names are given by <string-value>.<property-value>
+
+  ; <object-literal> 
+  ; appears anywhere, defined names are given by <property value>
+
+  (if (not (asn-doc bd-doc-asn))
+      (setf (asn-doc bd-doc-asn) (make-doc)))
+
+  (do ((p args)
+       (doc (asn-doc bd-doc-asn)))
+      ((not p))
+    (let ((prefix (and (eq (asn-type (first p)) :string) (token-value (asn-children (first p))))))
+      (cond
+        ((equal prefix "overload")
+         (setf p (process-bd-doc-group-overload (cdr p) doc)))
+
+        ((equal prefix "kwargs")
+         (setf (doc-kwargs doc) (asn-doc (cdr p))
+               p (third p)))
+
+         (prefix
+          (process-bd-doc-group-prefix (concatenate 'string prefix ".") (second p) append-doc-item)
+          (setf p (third p)))
+
+         (t
+          (process-bd-doc-group-prefix "" p append-doc-item)
+          (setf p (second p)))))))
+          
+
+#|
+
   ;if args has length 2 then.
   ;  first is a name prefix for the types defined by second
   ;  second is an object that gives a hash of types
@@ -440,7 +553,7 @@ bombs out the regex
         (setf prefix (concatenate 'string (token-value (asn-children (first args))) ".") object (second args))
         (setf prefix "" object (first args)))
     (dolist (item (asn-children object))
-      ;item is a cons (name . value), both name and value or ast's, name should be a string
+      ;item is a cons (name . value)
       (let* ((name (car item))
              (value (cdr item))
              (doc (or (asn-doc name) (asn-doc value))))
@@ -448,6 +561,8 @@ bombs out the regex
             (push :function (doc-flags doc)))
        ; (setf (doc-type doc) :type)
         (funcall append-doc-item (concatenate 'string prefix (token-value (asn-children name))) doc)))))
+|#
+
 ;;
 ;; These functions decode an ast node
 ;;
@@ -468,7 +583,7 @@ bombs out the regex
           (:name
            (token-value (asn-children ast)))
           (:dot
-           (get-asn-name-rootx (car (asn-children ast))))
+           (get-asn-name-root (car (asn-children ast))))
           (t nil))))
     (and (not (equal name "this")) name)))
 
@@ -493,14 +608,15 @@ bombs out the regex
                            (setf (aref source-text source-line-index) (concatenate 'string prefix "/" line1))
                            (nconc comment '(t)))))))
 
-             (traverse (ast)
+             (traverse (ast append-doc-item)
+               
                (if (not ast)
                    (return-from traverse))
                (case (asn-type ast)
                  ((:root :block) 
                   ;children --> list of statements
                   (dolist (statement (asn-children ast))
-                    (traverse statement)))
+                    (traverse statement append-doc-item)))
 
                  (:comment
                   ;children --> comment-token
@@ -508,18 +624,18 @@ bombs out the regex
 
                  (:label
                   ;children --> (label . statement)
-                  (traverse (second (asn-children ast))))
+                  (traverse (second (asn-children ast)) append-doc-item))
                  
                  (:switch
                   ;children --> (switch-expr  . case-list)
                   (let ((children (asn-children ast)))
-                    (traverse (car children))
+                    (traverse (car children)  append-doc-item)
                     (dolist (case-item (cdr children))
-                      (traverse case-item))))
+                      (traverse case-item  append-doc-item))))
 
                  (:case
                   ;children --> expression
-                  (traverse (asn-children ast)))
+                  (traverse (asn-children ast) append-doc-item))
 
                  (:default
                   ;children --> nil
@@ -532,47 +648,47 @@ bombs out the regex
                  (:do
                   ;children --> (condition . statment)
                   (let ((children (asn-children ast)))
-                    (traverse (car children))
-                    (traverse (cdr children))))
+                    (traverse (car children) append-doc-item)
+                    (traverse (cdr children) append-doc-item)))
 
                  (:return
                   ;children --> expression
                    (if (asn-comment ast)
                        (process-return ast (first doc-stack)))
-                   (traverse (asn-children ast)))
+                   (traverse (asn-children ast) append-doc-item))
 
                  (:throw
                   ;children --> throw-expr
                   (if (asn-comment ast)
                       ;todo---push the comment into the current function
                       nil)
-                  (traverse (asn-children ast)))
+                  (traverse (asn-children ast) append-doc-item))
 
                  (:var
                   ;children --> vardefs
                   ;vardefs is a list of lexical-var (name, init-val(expr), comment)
                   ;name is a token, expr is an expression or nil
                   (dolist (def (asn-children ast))
-                    (if (and (gen-doc (lexical-var-comment def)) (eq (length doc-stack) 1))
+                    (if (and (gen-doc (lexical-var-comment def)) )
                         (funcall append-doc-item (token-value (lexical-var-name def)) (create-*-doc (lexical-var-comment def) :variable)))
-;;TODO...DELETE                    (and (lexical-var-init-val def) (traverse (lexical-var-init-val def)))
+;;TODO...DELETE                    (and (lexical-var-init-val def) (traverse (lexical-var-init-val def) append-doc-item))
 ))
 
                  (:while
                   ;children --> (while-condition . while-statement)
                   (let ((children (asn-children ast)))
-                    (traverse (car children))
-                    (traverse (cdr children))))
+                    (traverse (car children) append-doc-item)
+                    (traverse (cdr children) append-doc-item)))
 
                  (:with
                   ;children --> (with-expr . with-statement)
                   (let ((children (asn-children ast)))
-                    (traverse (car children))
-                    (traverse (cdr children))))
+                    (traverse (car children) append-doc-item)
+                    (traverse (cdr children) append-doc-item)))
 
                  (:statement
                   ;children --> expression
-                  (traverse (asn-children ast)))
+                  (traverse (asn-children ast) append-doc-item))
 
                  ((:break :continue)
                   ;children --> name-token
@@ -581,8 +697,8 @@ bombs out the regex
                  (:for-in
                   ;children --> (list var name object statement)
                   (let ((children (asn-children ast)))
-                    (traverse (third children))
-                    (traverse (fourth children))))
+                    (traverse (third children) append-doc-item)
+                    (traverse (fourth children) append-doc-item)))
 
                  (:for
                   ;children --> (list var init test step statement)
@@ -594,13 +710,13 @@ bombs out the regex
                          (step (fourth children))
                          (statement (fifth children)))
                     (if (asn-p init)
-                        (traverse init)
+                        (traverse init append-doc-item)
                         (dolist (def init) ;def is a lexical-var
                           (if (lexical-var-init-val def)
-                              (traverse (lexical-var-init-val def)))))
-                    (and test (traverse test))
-                    (and step (traverse step))
-                    (and statement (traverse statement))))
+                              (traverse (lexical-var-init-val def) append-doc-item))))
+                    (and test (traverse test append-doc-item))
+                    (and step (traverse step append-doc-item))
+                    (and statement (traverse statement append-doc-item))))
 
                  ((:function-def :function-literal)
                   ;children --> (list name parameter-list body)
@@ -608,8 +724,33 @@ bombs out the regex
                   (setf (asn-doc ast) (create-function-doc ast #'ensure-doc-when-comment-exists))
                   (push (asn-doc ast) doc-stack)
                   (dolist (statement (third (asn-children ast)))
-                    (traverse statement))
-                  (pop doc-stack))
+                    (traverse statement append-doc-item))
+#|
+
+                  (do ((slist (third (asn-children ast))) ;slist is the list of statements for the function
+                       (done nil))
+                      (done)
+                    (setf done t) ;assume done; change back to not done if we get the end of the decision tree
+                    (let ((s (first slist)))
+                      (let ((s (and s (eq (asn-type s) :statement) (asn-children s)))) ;s is the expr of a simple statement or nil
+                        (let ((fname (and s (eq (asn-type s) :call) (get-ast-name (car (asn-children s)))))) ;fname is the name of a called function or nil
+                          (if (equal fname "bd.doc")
+                              (let* ((src-doc (asn-doc s))
+                                     (overload (doc-overloads src-doc))
+                                     (kwargs (doc-kwargs src-doc)))
+                                (and overload (push overload (doc-overloads (asn-doc ast))))
+                                (and kwargs (push kwargs (doc-kwargs (asn-doc ast))))
+                                (setf slist (cdr slist)
+                                      done nil))))))))
+|#
+
+                  (let ((s (first (third (asn-children ast))))) ;s is the first statement in the function
+                    (let ((s (and s (eq (asn-type s) :statement) (asn-children s)))) ;s is the expr of a simple statement or nil
+                      (let ((fname (and s (eq (asn-type s) :call) (get-ast-name (car (asn-children s)))))) ;fname is the name of a called function or nil
+                        (if (equal fname "bd.doc")
+                            (setf 
+                             (doc-overloads (asn-doc ast)) (doc-overloads (asn-doc s))
+                             (doc-kwargs (asn-doc ast)) (doc-kwargs (asn-doc s))))))))
 
                  (:if
                   ;children --> (list condition then else)
@@ -617,9 +758,9 @@ bombs out the regex
                          (condition (first children))
                          (then (second children))
                          (else (third children)))
-                    (traverse condition)
-                    (traverse then)
-                    (and else (traverse condition))))
+                    (traverse condition append-doc-item)
+                    (traverse then append-doc-item)
+                    (and else (traverse condition append-doc-item))))
 
                  (:try
                   ;children --> (list body catch finally)
@@ -627,33 +768,33 @@ bombs out the regex
                          (body (first children))
                          (catch (second children))
                          (finally (third children)))
-                    (traverse body)
-                    (and catch (traverse (cdr catch)))
-                    (and finally (traverse finally))))
+                    (traverse body append-doc-item)
+                    (and catch (traverse (cdr catch) append-doc-item))
+                    (and finally (traverse finally append-doc-item))))
 
                  (:expr-list
                   ;children --> list of expressions
                   (dolist (expr (asn-children ast))
-                    (traverse expr)))
+                    (traverse expr append-doc-item)))
 
                  (:new
                   ;children --> (new-expr . args)
                   ;args an expr-list asn
                   (create-doc ast)
                   (let* ((children (asn-children ast)))
-                    (traverse (car children))
-                    (traverse (cdr children))))
+                    (traverse (car children) append-doc-item)
+                    (traverse (cdr children) append-doc-item)))
 
                  ((:unary-prefix :unary-postfix)
                   ;children --> (cons (token-value op) expr)
                   (create-doc ast)
-                  (traverse (cdr (asn-children ast))))
+                  (traverse (cdr (asn-children ast)) append-doc-item))
 
                  (:array
                   ;children --> expr-list
                   (create-doc ast)
                   (dolist (item (asn-children ast))
-                    (traverse item)))
+                    (traverse item append-doc-item)))
 
                  (:object
                   ;children --> list of (property-name . expression)
@@ -666,7 +807,7 @@ bombs out the regex
                           (ensure-doc-when-comment-exists (asn-comment property-name))
                           (ensure-doc-when-comment-exists (asn-comment property-value)))
                         (create-doc property-name)
-                        (traverse (cdr property))
+                        (traverse (cdr property) append-doc-item)
                         (when (asn-doc property-name)
                           (setf (doc-location (asn-doc property-name)) (asn-location property-value)))
                         (when (asn-doc property-value)
@@ -687,7 +828,7 @@ bombs out the regex
                          (name (get-ast-name lhs)))
                     (if (asn-comment ast)
                         (create-doc ast))
-                    (traverse rhs)
+                    (traverse rhs append-doc-item)
                     (let ((doc (or (asn-doc ast) (asn-doc rhs))))
                       (if (and name doc)
                           (progn
@@ -696,22 +837,32 @@ bombs out the regex
                                 (setf (doc-type doc) :type))
                             (funcall append-doc-item name doc))))))
 
+
                  (:call
                   ;children --> (function-expression . args)
                   ;args --> (expression list)
-                  (create-doc ast) ;TODO this is a little weird; it's an expression
+                  (create-doc ast)
                   (let* ((children (asn-children ast))
                          (func-expr (car children))
                          (args (cdr children))
                          (function-name (get-ast-name func-expr)))
-                    (traverse func-expr)
-                    (dolist (arg args)
-                      (traverse arg))
+                    (if (and (equal function-name "dojo.def") (eq (asn-type (first args)) :string))
+                        (let ((module-name (token-value (asn-children (first args)))))
+                         (labels ((append-doc-item (name doc)
+                                    (setf (doc-defining-module doc) module-name)
+                                    (funcall append-doc-item name doc)))
+                           (traverse func-expr #'append-doc-item)
+                           (dolist (arg args)
+                             (traverse arg #'append-doc-item))))
+                        (progn
+                          (traverse func-expr append-doc-item)
+                          (dolist (arg args)
+                            (traverse arg append-doc-item))))
                     (cond
                       ((equal function-name "dojo.declare")
                        (process-dojo-declare (asn-location ast) args append-doc-item))
                        
-                      ((equal function-name "dojo.mixin")
+                      ((equal function-name "dojo.mix")
                        (process-dojo-mixin args get-doc-item append-doc-item))
 
                       ((equal function-name "dojo.provide")
@@ -720,11 +871,14 @@ bombs out the regex
                       ((equal function-name "dojo.require")
                        (process-dojo-require args resource))
 
-                      ((equal function-name "bd.docDef")
-                       (process-bd-docDef args append-doc-item))
+                      ((equal function-name "dojo.def")
+                       (process-dojo-def args resource (asn-location ast) append-doc-item))
 
-                      )))
+                      ((equal function-name "bd.doc")
+                       (push (asn-location ast) (doc-bd-doc-blocks (resource-doc resource)))
+                       (process-bd-doc args append-doc-item ast)))))
                  
+
                  ((:dot :sub :comma :|\|\|| :&& :|\|| :^ :& :== :=== :!= :!== :< :> :<= :>= :instanceof :>> :<< :>>> :+ :- :* :/ :%)
                   (create-doc ast))
                  
@@ -735,11 +889,11 @@ bombs out the regex
                          (condition (first children))
                          (true-expr (second children))
                          (false-expr (third children)))
-                    (traverse condition)
-                    (traverse true-expr)
-                    (traverse false-expr)))
+                    (traverse condition append-doc-item)
+                    (traverse true-expr append-doc-item)
+                    (traverse false-expr append-doc-item)))
                  )))
-      (traverse (resource-ast resource)))))
+      (traverse (resource-ast resource) append-doc-item))))
 
 
 

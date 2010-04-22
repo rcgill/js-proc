@@ -125,12 +125,15 @@
   flags      ;list of keywords
   sdoc       ;doc-section--short documentation
   ldoc       ;doc-section--long documentation
-  requires   ;list of items a resource includes (e.g., like dojo.require of C/C++ #include)
+  requires   ;list of items a resource includes (e.g., like dojo.require or C/C++ #include)
   require    ;list of items the user should include to gain access to the resource's contents
   provides   ;vector of provided items
+  modules    ;list of modules a resource defines
   returns    ;vector of vector of (type . doc-section)
   throws     ;vector of rt-item--possible thrown values
   params     ;vector of param--the lambda list for a function
+  overloads  ;list of doc instances that give functions that inform of overload signatures and semantics
+  kwargs     ;the keyward arguments for this function
   types      ;vector of types--vector of (type . section); used to document property types for an object
   errors     ;vector of doc-section--possible error/abnormal conditions
   supers     ;vector of string--superclasses
@@ -140,6 +143,8 @@
   inotes     ;doc-section--implementation notes
   location   ;quadruple as a list--(start-line start-char end-line end-char) location of the entity in the source resource
   source     ;resource--the resource that sourced this entity
+  defining-module ;string--the module that defines this item
+  bd-doc-blocks
 )
 
 (defun doc-get-sdoc (doc)

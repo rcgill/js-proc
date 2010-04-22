@@ -1,4 +1,4 @@
- (in-package #:js-proc)
+(in-package #:js-proc)
 
 (defun parse-js-string (string &optional strict-semicolons)
   (declare (ignore string))
@@ -140,36 +140,23 @@
 
 (defun sources ()
   (cons "/usr/home/rcgill/dev/backdraft/src/"
-        '(
-           "bd.init"
-           "bd.start"
-           "bd.collections"
-           "bd.capture"
-           "bd.command"
-           "bd.commandPackage"
-           "bd.commonPackage"
-           "bd.css"
-           "bd.dom"
-           "bd.delayProcManager"
-           "bd.frenzy"
-           "bd.symbols"
-           "bd.lang"
-           "bd.namespace"
-           "bd.parentSpace"
-           "bd.test"
-           "bd.test.proc"
-          )
-        ;(list "bd.symbols" "bd.init" "bd.collections" "bd.frenzy")
-;(list "bd.dijit.staticText")
-        ;(backdraft-sources)
-        ))
+        '("bd"
+          ;"bd.start"
+          ;"bd.collections"
+          ;"bd.capture"
+          ;"bd.command"
+          ;"bd.css"
+          ;"bd.dom"
+          ;"bd.async"
+          ;"bd.frenzy"
+          ;"bd.symbols"
+          ;"bd.lang"
+          ;"bd.namespace"
+          ;"bd.parentSpace"
+          ;"bd.test"
+          ;"bd.test.proc"
+          )))
 
-(defun sourcesx ()
-  (cons "/usr/home/rcgill/dev/js-proc/test/js-doc/"
-        (list 
-         "test08"
-         )))
-        
 (defun test0 ()
   (clrhash *doc-items*)
   (process-batch (sources))
@@ -191,7 +178,7 @@
 ./bd/data/selector/ds/keyFilter.js
 ./bd/data/selector/ds/simpleFilter.js
 ./bd/data/selector/rs/simpleFilter.js
-./bd/delayProcManager.js
+./bd/async.js
 ./bd/descriptor/cache.js
 ./bd/descriptor/processor.js
 ./bd/dijit/borderContainer.js

@@ -98,6 +98,11 @@
              (and (plusp (length params))
                   (cat-prop-value "params" (cat-array (map 'vector #'dump-param params) t))))
 
+           (dump-overloads (overloads)
+             ;;overloads is a list of function doc items
+             (if overloads
+                 (cat-prop-value "overloads" (cat-array (map 'vector (lambda (item) (dump-doc-item nil item) ) overloads) t))))
+
            (dump-property (property)
              ;;property is a cons (name . expr), name and expr are asn's
              ;the comment may be on either the name of the expr
@@ -135,6 +140,10 @@
            (dump-source-name (source)
              (and source (cat-prop-value "src" (quote-string (resource-name source)))))
 
+           (dump-bd-doc-locs (locs) 
+             (if locs
+                 (cat-prop-value "docLocs" (cat-array (map 'vector (lambda (loc) (format nil "[~A,~A]" (location-start-line loc) (location-end-line loc))) locs)))))
+
            (dump-source-location (loc)
              (if loc
                  (format nil "loc: [~A,~A,~A,~A]" (location-start-line loc) (location-start-char loc) (location-end-line loc) (location-end-char loc))))
@@ -152,6 +161,7 @@
            (dump-name (name type)
              (case type
                (:resource (concatenate 'string "\"resources." name "\""))
+               (:module (concatenate 'string "\"modules." name "\""))
                (otherwise (quote-string name))))
 
            (dump-flags (flags)
@@ -173,15 +183,29 @@
            (dump-require (requires)
              (if requires
                  (cat-prop-value "require" (cat-array (map 'vector (lambda (name) (quote-string name)) requires)))))
-                 
+               
+           (dump-modules (modules)
+             (if modules
+                 (cat-prop-value "modules" (cat-array (map 'vector (lambda (name) (quote-string name)) modules)))))                 
+               
+           (dump-defining-module (module)
+             (if module
+                 (concatenate 'string "module:" (quote-string module))))
 
            (dump-doc-item (name item &optional (class-member nil))
+             ;;these fixups should go into another module
+             (if (and (eq (doc-type item) :resource) (not (doc-sdoc item)) (doc-modules item))
+                 (setf (doc-sdoc item) (doc-section-push-chunk (make-doc-chunk :md (concatenate 'string "Defines the module " (first (doc-modules item))) nil))))
+
+;               (setf (doc-sdoc item) (concatenate 'string "Defines the module " (first (doc-modules item)))))
+
              (let ((result (cat-prop-value "type" (dump-type (doc-type item)))))
                (setf result (cat-prop result (dump-sdoc (doc-sdoc item))))
                (setf result (cat-prop result (dump-imember class-member)))
                (setf result (cat-prop result (dump-ldoc (doc-ldoc item))))
                (setf result (cat-prop result (dump-flags (doc-flags item))))
                (setf result (cat-prop result (dump-params (doc-params item))))
+               (setf result (cat-prop result (dump-overloads (doc-overloads item))))
                (setf result (cat-prop result (dump-returns-throws (doc-returns item) :returns)))
                (setf result (cat-prop result (dump-returns-throws (doc-throws item) :throws)))
                (setf result (cat-prop result (dump-properties (doc-properties item))))
@@ -191,8 +215,12 @@
                (setf result (cat-prop result (dump-supers (doc-supers item))))
                (setf result (cat-prop result (dump-requires (doc-requires item))))
                (setf result (cat-prop result (dump-require (doc-require item))))
+               (setf result (cat-prop result (dump-modules (doc-modules item))))
+               (setf result (cat-prop result (dump-defining-module (doc-defining-module item))))
                (if (eq (doc-type item) :resource)
-                   (setf result (cat-prop result (dump-source (resource-text (doc-source item))))))
+                   (setf 
+                    result (cat-prop result (dump-bd-doc-locs (doc-bd-doc-blocks item)))
+                    result (cat-prop result (dump-source (resource-text (doc-source item))))))
                (setf result (concatenate 'string lbrace-new-line-str result rbrace-new-line-str))
                (if name
                  (setf result (concatenate 'string (dump-name name (doc-type item)) ":" result)))
