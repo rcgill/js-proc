@@ -1,5 +1,17 @@
 (in-package #:js-proc)
 
+#|
+TODO:
+// bla
+///
+//return 
+// etc
+
+fails
+
+If you put an overload in a function that doesn't have a doc comment (or maybe params) fails.
+|#
+
 (defun make-svector (&optional (first-value nil))
   (let ((result (make-array 100 :element-type 'string :fill-pointer 0 :adjustable t)))
     (if first-value
@@ -463,9 +475,9 @@ bombs out the regex
 
 (defun process-dojo-declare (loc arg-list append-doc-item)
   ;args is the list of argument expressions sent to dojo.declare
-  (let ((class-name (token-value (asn-children (first arg-list))))
-        (supers (second arg-list))
-        (doc (asn-doc (third arg-list))))
+  (let ((class-name (concatenate 'string (get-ast-name (second arg-list)) "." (token-value (asn-children (first arg-list)))))
+        (supers (third arg-list))
+        (doc (asn-doc (fourth arg-list))))
     (setf 
      (doc-type doc) :class
      (doc-location doc) loc
@@ -501,7 +513,7 @@ bombs out the regex
       (funcall append-doc-item (concatenate 'string prefix (token-value (asn-children name))) doc))))
 
 (defun process-bd-doc (args append-doc-item bd-doc-asn)
-  ;args is the list of argument expressions sent to bd.doc
+  ;args is the list of argument expressions sent to bd.docGen
   ;the expressions come in one or more groups of:
 
   ; "overload", <function-literal>+
@@ -734,7 +746,7 @@ bombs out the regex
                     (let ((s (first slist)))
                       (let ((s (and s (eq (asn-type s) :statement) (asn-children s)))) ;s is the expr of a simple statement or nil
                         (let ((fname (and s (eq (asn-type s) :call) (get-ast-name (car (asn-children s)))))) ;fname is the name of a called function or nil
-                          (if (equal fname "bd.doc")
+                          (if (equal fname "bd.docGen")
                               (let* ((src-doc (asn-doc s))
                                      (overload (doc-overloads src-doc))
                                      (kwargs (doc-kwargs src-doc)))
@@ -747,7 +759,7 @@ bombs out the regex
                   (let ((s (first (third (asn-children ast))))) ;s is the first statement in the function
                     (let ((s (and s (eq (asn-type s) :statement) (asn-children s)))) ;s is the expr of a simple statement or nil
                       (let ((fname (and s (eq (asn-type s) :call) (get-ast-name (car (asn-children s)))))) ;fname is the name of a called function or nil
-                        (if (equal fname "bd.doc")
+                        (if (equal fname "bd.docGen")
                             (setf 
                              (doc-overloads (asn-doc ast)) (doc-overloads (asn-doc s))
                              (doc-kwargs (asn-doc ast)) (doc-kwargs (asn-doc s))))))))
@@ -859,7 +871,7 @@ bombs out the regex
                           (dolist (arg args)
                             (traverse arg append-doc-item))))
                     (cond
-                      ((equal function-name "dojo.declare")
+                      ((or (equal function-name "dojo.declare") (equal function-name "bd.declare"))
                        (process-dojo-declare (asn-location ast) args append-doc-item))
                        
                       ((equal function-name "dojo.mix")
@@ -874,7 +886,7 @@ bombs out the regex
                       ((equal function-name "dojo.def")
                        (process-dojo-def args resource (asn-location ast) append-doc-item))
 
-                      ((equal function-name "bd.doc")
+                      ((equal function-name "bd.docGen")
                        (push (asn-location ast) (doc-bd-doc-blocks (resource-doc resource)))
                        (process-bd-doc args append-doc-item ast)))))
                  
