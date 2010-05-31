@@ -144,3 +144,221 @@ PARSE-JS> (parse-js-string "var a=1, b=2;")
 DELTAS:
 
 renamed "expression-allowed" to "regex-allowed" in tokenize.lisp
+
+
+
+
+(defun find-defines-and-references (resource defines)
+  (let ((references (resource-references resource))
+        (lex-stack nil))
+    (labels (
+             (lexical-var-p (name)
+               (dolist (frame lex-stack)
+                 (if (gethash name frame)
+                     (return-from lexical-var-p t)))
+               nil)
+
+             (traverse-var-defs (defs)
+               ;defs is a list of lexical-var (name, init-val(expr), comment)
+               ;name is a token, expr is an expression or nil
+               (dolist (def defs)
+                 (let ((name (token-value (lexical-var-name def))))
+                   (if (not lex-stack)
+                     ;top-level variable being defined...
+                     (setf (gethash name defines) resource)
+                     ;defining lexical vars in the current scope
+                     (setf (gethash name (car lex-stack)) t))
+                   (traverse (lexical-var-init-val def)))))
+
+             (traverse (ast)
+               (if (not ast)
+                   (return-from traverse))
+               (case (asn-type ast)
+                 ((:root :block) 
+                  ;children --> list of statements
+                  (dolist (statement (asn-children ast))
+                    (traverse statement)))
+
+                 (:label
+                  ;children --> (label . statement)
+                  (traverse (second (asn-children ast))))
+                 
+                 (:switch
+                  ;children --> (switch-expr  . case-list)
+                  (let ((children (asn-children ast)))
+                    (traverse (car children))
+                    (dolist (case-item (cdr children))
+                      (traverse case-item))))
+
+                 (:case
+                  ;children --> expression
+                  (traverse (asn-children ast)))
+
+                 (:do
+                  ;children --> (condition . statment)
+                  (let ((children (asn-children ast)))
+                    (traverse (car children))
+                    (traverse (cdr children))))
+
+                 (:return
+                  ;children --> expression
+                   (traverse (asn-children ast)))
+
+                 (:throw
+                  ;children --> throw-expr
+                  (traverse (asn-children ast)))
+
+                 (:var
+                  ;children --> vardefs
+                  ;vardefs is a list of lexical-var (name, init-val(expr), comment)
+                  ;name is a token, expr is an expression or nil
+                  (traverse-var-defs (asn-children ast)))
+
+                 (:while
+                  ;children --> (while-condition . while-statement)
+                  (let ((children (asn-children ast)))
+                    (traverse (car children))
+                    (traverse (cdr children))))
+
+                 (:with
+                  ;children --> (with-expr . with-statement)
+                  (format t "WARNING: used with, dependency tree may be wrong"))
+
+                 (:statement
+                  ;children --> expression
+                  (traverse (asn-children ast)))
+
+                 (:for-in
+                  ;children --> (list var name object statement)
+                  (let ((children (asn-children ast)))
+                    (traverse (third children))
+                    (traverse (fourth children))))
+
+                 (:for
+                  ;children --> (list var init test step statement)
+                  ;var --> var keyword or nil
+                  ;init --> (nil | vardefs (see :var, above) | asn (an expression))
+                  ;test, step --> (nil | asn (an expression)
+                  (let ((children (asn-children ast)))
+                    (if (first children)
+                        (traverse-var-defs (second children))
+                        (traverse (second children)))
+                    (traverse (third children))
+                    (traverse (fourth children))
+                    (traverse (fifth children))))
+
+                 ((:function-def :function-literal)
+                  ;children --> (list name parameter-list body)
+                  ;parameter-list --> (list of (name . comment))
+                  ;body --> is a list of statements
+                  (let ((lex-vars (car (push (make-hash-table :test 'equal) lex-stack))))
+                    (dolist (p (second (asn-children ast)))
+                      (setf (gethash (car p) lex-vars) t))
+                    (dolist (statement (third (asn-children ast)))
+                      (traverse statement))
+                    (pop lex-stack)))
+
+                 (:if
+                  ;children --> (list condition then else)
+                  (dolist (child (asn-children ast))
+                    (traverse child)))
+
+                 (:try
+                  ;children --> (list body catch finally)
+                  ; catch --> (name-token . statement)
+                  (let ((children (asn-children ast)))
+                    (traverse (first children))
+                    (traverse (cdr (second children)))
+                    (traverse (third children))))
+
+                 (:expr-list
+                  ;children --> list of expressions
+                  (dolist (expr (asn-children ast))
+                    (traverse expr)))
+
+                 (:new
+                  ;children --> (new-expr . args)
+                  ;args an expr-list asn
+                  (let ((children (asn-children ast)))
+                    (traverse (car children))
+                    (traverse (cdr children))))
+
+                 ((:unary-prefix :unary-postfix)
+                  ;children --> (cons (token-value op) expr)
+                  (traverse (cdr (asn-children ast))))
+
+                 (:array
+                  ;children --> expr-list
+                  (dolist (item (asn-children ast))
+                    (traverse item)))
+
+                 (:object
+                  ;children --> list of (property-name . expression)
+                  (dolist (prop (asn-children ast))
+                    (traverse (cdr prop))))
+
+                 ((:= :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=)
+                  ;children --> (lhs . rhs)
+                  (let* ((lhs (car (asn-children ast)))
+                         (name-root (get-asn-name-root lhs))
+                         (name (and name-root (get-ast-name lhs)))
+                         (rhs (cdr (asn-children ast))))
+                    (if (and name-root (not (lexical-var-p name-root)))
+                        (setf (gethash name defines) resource))
+                    (traverse rhs)))
+
+
+                 (:call
+                  ;children --> (function-expression . args)
+                  ;args --> (expression list)
+                  (let* ((children (asn-children ast))
+                         (func-expr (car children))
+                         (args (cdr children))
+                         (root (get-asn-name-root func-expr))
+                         (function-name (and root (get-ast-name func-expr))))
+                    (traverse func-expr)
+                    (dolist (arg args)
+                      (traverse arg))
+                    (if (and root (not (lexical-var-p root)))
+                        (setf (gethash function-name references) t))
+                    (cond
+                      ((equal function-name "dojo.declare")
+                       (if (eq (asn-type (first args)) :string)
+                           (setf (gethash (token-value (asn-children (first args))) defines) resource))
+                       )
+                       
+                      ((equal function-name "dojo.mixin")
+                       (let ((root (get-asn-name-root (first args)))
+                             (name (and root (get-ast-name (first args))))
+                             (plist (and (eq (asn-type (second args)) :object) (asn-children (second args)))))
+                         (if (and root (not (lexical-var-p root)))
+                             (dolist (prop plist)
+                               (setf (gethash (concatenate 'string name "." (get-ast-name (car prop))) defines) resource))))
+                       )
+
+                      )))
+                 
+                 ((:sub :comma :|\|\|| :&& :|\|| :^ :& :== :=== :!= :!== :< :> :<= :>= :instanceof :>> :<< :>>> :+ :- :* :/ :%)
+                  (traverse (car (asn-children ast)))
+                  (traverse (cdr (asn-children ast))))
+
+                 (:dot
+                  (let ((root (get-asn-name-root ast)))
+                    (if (and root (not (lexical-var-p root)))
+                        (setf (gethash (get-ast-name ast) references) t))))
+                 
+                 (:conditional
+                  ;children --> (list condition true-expr false-expr)
+                  (dolist (expr (asn-children ast))
+                    (traverse expr)))
+
+                 (t)
+                 )))
+      (traverse (resource-ast resource))
+      (format t "Defines: ")
+      (maphash (lambda (key value) (if (eq value resource) (remhash key references))) defines)
+      (maphash (lambda (key value) (if (eq value resource) (format t "~A " key))) defines)
+      (format t "~%References: ")
+      (maphash (lambda (key value) (declare (ignore value)) (format t "~A " key)) references)
+      (format t "~%")
+)))

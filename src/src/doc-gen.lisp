@@ -10,6 +10,8 @@ TODO:
 fails
 
 If you put an overload in a function that doesn't have a doc comment (or maybe params) fails.
+
+if a module doesn't have a doc block--seem to crach
 |#
 
 (defun make-svector (&optional (first-value nil))
@@ -24,7 +26,7 @@ If you put an overload in a function that doesn't have a doc comment (or maybe p
 
 (defparameter *pragma-map*
   (let ((pragmas (make-hash-table :test 'equal)))
-    (dolist (word '(:mu :md :namespace :const :enum :type :variable :kwargs :hash :private :nosource :note :warn :code :return :throw :case :todo :todoc :inote :file :require))
+    (dolist (word '(:mu :md :namespace :const :enum :type :variable :kwargs :hash :private :nosource :note :warn :code :return :throw :case :todo :todoc :inote :file :require :classattr))
       (let ((word-string (string-downcase (string word))))
         (setf 
          (gethash word-string pragmas) word
@@ -107,6 +109,10 @@ If you put an overload in a function that doesn't have a doc comment (or maybe p
             (values nil args)))
       (values nil rest-of-line)))
 
+(defun trimmed-text (text)
+  (let ((text (and (plusp (length text)) (string-right-trim '(#\Space #\Tab) text))))
+    (and (plusp (length text)) text)))
+
 (defun sift-pragmas (text)
   ; map text to a list of sifted-lines
   ; nil pragma implies there was no pragma as given by *pragmas*
@@ -115,12 +121,10 @@ If you put an overload in a function that doesn't have a doc comment (or maybe p
   (map 'list 
        (lambda (s)
          (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings pragma-scanner s)
-           ;(let* ((pragma (and match (check-pragma (aref match-strings 4) (aref match-strings 6))))
-           ;       (rest-of-line (and pragma (aref match-strings 7) (string-right-trim '(#\Space #\Tab) (aref match-strings 7))))
            (multiple-value-bind (args rest-of-line) (get-args (aref match-strings 6) (aref match-strings 7))
              (let ((pragma (and match (check-pragma (aref match-strings 4) args))))
                (if pragma
-                   (make-sifted-line :pragma pragma :args args :text (and (plusp (length rest-of-line)) rest-of-line))
+                   (make-sifted-line :pragma pragma :args args :text (trimmed-text rest-of-line))
                    (let ((s (cl-ppcre:regex-replace //-comment-scanner s "")))
                      (make-sifted-line :text (and (cl-ppcre:scan non-space-scanner s) (string-right-trim '(#\Space #\Tab) s)))))))))
          text))
@@ -248,47 +252,6 @@ If you put an overload in a function that doesn't have a doc comment (or maybe p
           (funcall ensure-doc-when-comment-exists (cdr p))
           (vector-push-extend (get-doc-param (car p) (first (cdr p))) params)))))
 
-  #|
-(defun get-overload (text)
-  text must have lines like:
-  // (a1, a2, ..., an)
-  // a1: (type) asdlkj asldkjf
-  // a1: (type) asdlkj asldkjf
-  //
-  // <description>
-  (let ((overload (string-trim '(#\Space #\Tab) (line-text text)))
-        (params (make-doc-params))
-        (description (make-doc-section)))
-        (p (cdr text))
-    (do ((done nil))
-        (done (values overload description params p))
-      (multiple-value-bind (match match-strings) (cl-ppcre:scan-to-strings overload-parameter-type-scanner (line-text p))
-        (cond
-          (match
-              (let ((name (aref match-strings 1))
-                    (raw-doc (list (concatenate 'string "//" (aref match-strings 2)))))
-                (do ((done nil))
-                    (done (vector-push-extend (get-doc-param name raw-doc) params))
-                  (if (and (not (cl-ppcre:scan overload-parameter-type-scanner (line-text p))) (line-text p))
-                      (progn (push raw-doc (concatenate 'string "//" (line-text p))) (setf p (cdr p)))
-                      (setf done t)))))
-          ((not (line-text p))
-           (setf p (cdr p))
-           (do ()
-               (done)
-             (case (line-pragma p) 
-               ((:note :warn :code :todo :todoc :inote)
-                (setf p (get-doc-simple-subsection pragma p description)))
-
-               (:end
-                (if (line-text text) 
-                    (setf p (get-doc-chunk :md text description))    
-                    (setf p (cdr p) done t)))
-                 
-               (t
-                (setf p (get-doc-chunk (or pragma :md) p description)))))))))))
-  |#
-
 (defun gen-doc (comment)
   (cond
     ((not comment) nil)
@@ -311,16 +274,10 @@ If you put an overload in a function that doesn't have a doc comment (or maybe p
               (doc-type doc) pragma 
               text (cdr text)))
 
-            ((:kwargs :hash :nosource)
+            ((:kwargs :hash :nosource :private :classattr)
              (push pragma (doc-flags doc))
              (setf text (cdr text)))
-
-            (:private
-             (push :private (doc-flags doc))
-             (if (line-text text) 
-                 (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc)))
-                 (setf text (cdr text))))
-                 
+           
             ((:note :warn :code)
              (setf text (get-doc-simple-subsection pragma text (doc-get-ldoc doc))))
 
@@ -443,7 +400,9 @@ bombs out the regex
                    (prop-value (cdr prop))
                    (prop-doc (or (asn-doc prop-name) (asn-doc prop-value))))
               (if prop-doc
-                  (funcall append-doc-item (concatenate 'string parent-name "." (get-ast-name prop-name)) prop-doc))))))))
+                  (progn
+                    (setf (doc-location prop-doc) (sum-locations (asn-location prop-name)(asn-location prop-value)))
+                    (funcall append-doc-item (concatenate 'string parent-name "." (get-ast-name prop-name)) prop-doc)))))))))
 
 (defun process-dojo-provide (args resource)
   ;args is the list of argument expressions sent to dojo.provide
@@ -472,6 +431,34 @@ bombs out the regex
          (doc-type doc) :module)
         (funcall append-doc-item name doc)
         (push name (doc-modules (resource-doc resource))))))
+
+(defparameter colon-scanner
+  (cl-ppcre:create-scanner ":"))
+
+(defun process-bd-declare (ast arg-list append-doc-item)
+  ;args is the list of argument expressions sent to bd.declare
+  (let ((class-name (cl-ppcre:regex-replace colon-scanner (token-value (asn-children (first arg-list))) "."))
+        (supers (second arg-list))
+        (doc (asn-doc ast))
+        (loc (asn-location ast)))
+    (setf
+     (doc-type doc) :class
+     (doc-location doc) loc)
+    (case (asn-type supers)
+      (:array 
+       (setf (doc-supers doc) (mapcar #'get-ast-name (asn-children supers))))
+      ((:name :dot)
+       (setf (doc-supers doc) (cons (get-ast-name supers) nil)))
+      (t
+       (setf (doc-supers doc) nil)))
+    (dolist (arg (cdr (cdr arg-list)))
+      (if (eq (asn-type arg) :object)
+          (setf (doc-members doc) (nconc (doc-members doc) (doc-properties (asn-doc arg))))
+          (let ((name (token-value (asn-children (second (asn-children arg)))))
+                (attr-doc (asn-doc arg)))
+            (setf (doc-location attr-doc) (asn-location arg))
+            (setf (doc-members doc) (nconc (list (cons name attr-doc)) (doc-members doc))))))
+    (funcall append-doc-item class-name doc)))
 
 (defun process-dojo-declare (loc arg-list append-doc-item)
   ;args is the list of argument expressions sent to dojo.declare
@@ -510,13 +497,14 @@ bombs out the regex
            (doc (or (asn-doc name) (asn-doc value))))
       (if (eq (doc-type doc) :function) 
           (push :function (doc-flags doc)))
+      (setf (doc-location doc) (sum-locations (asn-location name)(asn-location value)))
       (funcall append-doc-item (concatenate 'string prefix (token-value (asn-children name))) doc))))
 
 (defun process-bd-doc (args append-doc-item bd-doc-asn)
   ;args is the list of argument expressions sent to bd.docGen
   ;the expressions come in one or more groups of:
 
-  ; "overload", <function-literal>+
+  ; "overload", <function-literal>
   ; appears as first expression in function and gives possible overload signatures for function.
   ; this will be processed by the function doc generator
 
@@ -541,7 +529,7 @@ bombs out the regex
          (setf p (process-bd-doc-group-overload (cdr p) doc)))
 
         ((equal prefix "kwargs")
-         (setf (doc-kwargs doc) (asn-doc (cdr p))
+         (setf (doc-kwargs doc) (asn-doc (second p))
                p (third p)))
 
          (prefix
@@ -551,29 +539,6 @@ bombs out the regex
          (t
           (process-bd-doc-group-prefix "" p append-doc-item)
           (setf p (second p)))))))
-          
-
-#|
-
-  ;if args has length 2 then.
-  ;  first is a name prefix for the types defined by second
-  ;  second is an object that gives a hash of types
-  ;otherwise
-  ;  first of args is an object that gives a hash of types
-  (let (prefix object)
-    (if (eq (length args) 2) 
-        (setf prefix (concatenate 'string (token-value (asn-children (first args))) ".") object (second args))
-        (setf prefix "" object (first args)))
-    (dolist (item (asn-children object))
-      ;item is a cons (name . value)
-      (let* ((name (car item))
-             (value (cdr item))
-             (doc (or (asn-doc name) (asn-doc value))))
-        (if (eq (doc-type doc) :function) 
-            (push :function (doc-flags doc)))
-       ; (setf (doc-type doc) :type)
-        (funcall append-doc-item (concatenate 'string prefix (token-value (asn-children name))) doc)))))
-|#
 
 ;;
 ;; These functions decode an ast node
@@ -737,24 +702,6 @@ bombs out the regex
                   (push (asn-doc ast) doc-stack)
                   (dolist (statement (third (asn-children ast)))
                     (traverse statement append-doc-item))
-#|
-
-                  (do ((slist (third (asn-children ast))) ;slist is the list of statements for the function
-                       (done nil))
-                      (done)
-                    (setf done t) ;assume done; change back to not done if we get the end of the decision tree
-                    (let ((s (first slist)))
-                      (let ((s (and s (eq (asn-type s) :statement) (asn-children s)))) ;s is the expr of a simple statement or nil
-                        (let ((fname (and s (eq (asn-type s) :call) (get-ast-name (car (asn-children s)))))) ;fname is the name of a called function or nil
-                          (if (equal fname "bd.docGen")
-                              (let* ((src-doc (asn-doc s))
-                                     (overload (doc-overloads src-doc))
-                                     (kwargs (doc-kwargs src-doc)))
-                                (and overload (push overload (doc-overloads (asn-doc ast))))
-                                (and kwargs (push kwargs (doc-kwargs (asn-doc ast))))
-                                (setf slist (cdr slist)
-                                      done nil))))))))
-|#
 
                   (let ((s (first (third (asn-children ast))))) ;s is the first statement in the function
                     (let ((s (and s (eq (asn-type s) :statement) (asn-children s)))) ;s is the expr of a simple statement or nil
@@ -811,7 +758,8 @@ bombs out the regex
                  (:object
                   ;children --> list of (property-name . expression)
                   (create-doc ast)
-                  (let ((mark-doc (asn-doc ast)))
+                  (let ((mark-doc (asn-doc ast))
+                        (has-content nil))
                     (dolist (property (asn-children ast))
                       (let ((property-name (car property))
                             (property-value (cdr property)))
@@ -821,9 +769,11 @@ bombs out the regex
                         (create-doc property-name)
                         (traverse (cdr property) append-doc-item)
                         (when (asn-doc property-name)
-                          (setf (doc-location (asn-doc property-name)) (asn-location property-value)))
+                          (setf has-content t (doc-location (asn-doc property-name)) (asn-location property-value)))
                         (when (asn-doc property-value)
-                          (setf (doc-location (asn-doc property-value)) (asn-location property-value))))))
+                          (setf has-content t (doc-location (asn-doc property-value)) (asn-location property-value)))))
+                    (if (and has-content (not (asn-doc ast)))
+                        (setf (asn-doc ast) (make-doc :type :variable))))
                   (if (asn-doc ast)
                       (setf (doc-location (asn-doc ast)) (asn-location ast)
                             (doc-properties (asn-doc ast)) (asn-children ast))))
@@ -871,10 +821,19 @@ bombs out the regex
                           (dolist (arg args)
                             (traverse arg append-doc-item))))
                     (cond
-                      ((or (equal function-name "dojo.declare") (equal function-name "bd.declare"))
+                      ((equal function-name "dojo.declare")
                        (process-dojo-declare (asn-location ast) args append-doc-item))
                        
-                      ((equal function-name "dojo.mix")
+                      ((equal function-name "bd.declare")
+                       (process-bd-declare ast args append-doc-item))
+                      
+                      ((or (equal function-name "bd.attr") (equal function-name "bd.domAttr"))
+                       (push :attr (doc-flags (asn-doc ast))))
+                             
+                      ((or (equal function-name "bd.constAttr") (equal function-name "bd.constDomAttr"))
+                       (push :roAttr (doc-flags (asn-doc ast))))
+                       
+                      ((or (equal function-name "dojo.mix") (equal function-name "bd.mix"))
                        (process-dojo-mixin args get-doc-item append-doc-item))
 
                       ((equal function-name "dojo.provide")
@@ -906,220 +865,3 @@ bombs out the regex
                     (traverse false-expr append-doc-item)))
                  )))
       (traverse (resource-ast resource) append-doc-item))))
-
-
-
-(defun find-defines-and-references (resource defines)
-  (let ((references (resource-references resource))
-        (lex-stack nil))
-    (labels (
-             (lexical-var-p (name)
-               (dolist (frame lex-stack)
-                 (if (gethash name frame)
-                     (return-from lexical-var-p t)))
-               nil)
-
-             (traverse-var-defs (defs)
-               ;defs is a list of lexical-var (name, init-val(expr), comment)
-               ;name is a token, expr is an expression or nil
-               (dolist (def defs)
-                 (let ((name (token-value (lexical-var-name def))))
-                   (if (not lex-stack)
-                     ;top-level variable being defined...
-                     (setf (gethash name defines) resource)
-                     ;defining lexical vars in the current scope
-                     (setf (gethash name (car lex-stack)) t))
-                   (traverse (lexical-var-init-val def)))))
-
-             (traverse (ast)
-               (if (not ast)
-                   (return-from traverse))
-               (case (asn-type ast)
-                 ((:root :block) 
-                  ;children --> list of statements
-                  (dolist (statement (asn-children ast))
-                    (traverse statement)))
-
-                 (:label
-                  ;children --> (label . statement)
-                  (traverse (second (asn-children ast))))
-                 
-                 (:switch
-                  ;children --> (switch-expr  . case-list)
-                  (let ((children (asn-children ast)))
-                    (traverse (car children))
-                    (dolist (case-item (cdr children))
-                      (traverse case-item))))
-
-                 (:case
-                  ;children --> expression
-                  (traverse (asn-children ast)))
-
-                 (:do
-                  ;children --> (condition . statment)
-                  (let ((children (asn-children ast)))
-                    (traverse (car children))
-                    (traverse (cdr children))))
-
-                 (:return
-                  ;children --> expression
-                   (traverse (asn-children ast)))
-
-                 (:throw
-                  ;children --> throw-expr
-                  (traverse (asn-children ast)))
-
-                 (:var
-                  ;children --> vardefs
-                  ;vardefs is a list of lexical-var (name, init-val(expr), comment)
-                  ;name is a token, expr is an expression or nil
-                  (traverse-var-defs (asn-children ast)))
-
-                 (:while
-                  ;children --> (while-condition . while-statement)
-                  (let ((children (asn-children ast)))
-                    (traverse (car children))
-                    (traverse (cdr children))))
-
-                 (:with
-                  ;children --> (with-expr . with-statement)
-                  (format t "WARNING: used with, dependency tree may be wrong"))
-
-                 (:statement
-                  ;children --> expression
-                  (traverse (asn-children ast)))
-
-                 (:for-in
-                  ;children --> (list var name object statement)
-                  (let ((children (asn-children ast)))
-                    (traverse (third children))
-                    (traverse (fourth children))))
-
-                 (:for
-                  ;children --> (list var init test step statement)
-                  ;var --> var keyword or nil
-                  ;init --> (nil | vardefs (see :var, above) | asn (an expression))
-                  ;test, step --> (nil | asn (an expression)
-                  (let ((children (asn-children ast)))
-                    (if (first children)
-                        (traverse-var-defs (second children))
-                        (traverse (second children)))
-                    (traverse (third children))
-                    (traverse (fourth children))
-                    (traverse (fifth children))))
-
-                 ((:function-def :function-literal)
-                  ;children --> (list name parameter-list body)
-                  ;parameter-list --> (list of (name . comment))
-                  ;body --> is a list of statements
-                  (let ((lex-vars (car (push (make-hash-table :test 'equal) lex-stack))))
-                    (dolist (p (second (asn-children ast)))
-                      (setf (gethash (car p) lex-vars) t))
-                    (dolist (statement (third (asn-children ast)))
-                      (traverse statement))
-                    (pop lex-stack)))
-
-                 (:if
-                  ;children --> (list condition then else)
-                  (dolist (child (asn-children ast))
-                    (traverse child)))
-
-                 (:try
-                  ;children --> (list body catch finally)
-                  ; catch --> (name-token . statement)
-                  (let ((children (asn-children ast)))
-                    (traverse (first children))
-                    (traverse (cdr (second children)))
-                    (traverse (third children))))
-
-                 (:expr-list
-                  ;children --> list of expressions
-                  (dolist (expr (asn-children ast))
-                    (traverse expr)))
-
-                 (:new
-                  ;children --> (new-expr . args)
-                  ;args an expr-list asn
-                  (let ((children (asn-children ast)))
-                    (traverse (car children))
-                    (traverse (cdr children))))
-
-                 ((:unary-prefix :unary-postfix)
-                  ;children --> (cons (token-value op) expr)
-                  (traverse (cdr (asn-children ast))))
-
-                 (:array
-                  ;children --> expr-list
-                  (dolist (item (asn-children ast))
-                    (traverse item)))
-
-                 (:object
-                  ;children --> list of (property-name . expression)
-                  (dolist (prop (asn-children ast))
-                    (traverse (cdr prop))))
-
-                 ((:= :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :|\|=| :^=)
-                  ;children --> (lhs . rhs)
-                  (let* ((lhs (car (asn-children ast)))
-                         (name-root (get-asn-name-root lhs))
-                         (name (and name-root (get-ast-name lhs)))
-                         (rhs (cdr (asn-children ast))))
-                    (if (and name-root (not (lexical-var-p name-root)))
-                        (setf (gethash name defines) resource))
-                    (traverse rhs)))
-
-
-                 (:call
-                  ;children --> (function-expression . args)
-                  ;args --> (expression list)
-                  (let* ((children (asn-children ast))
-                         (func-expr (car children))
-                         (args (cdr children))
-                         (root (get-asn-name-root func-expr))
-                         (function-name (and root (get-ast-name func-expr))))
-                    (traverse func-expr)
-                    (dolist (arg args)
-                      (traverse arg))
-                    (if (and root (not (lexical-var-p root)))
-                        (setf (gethash function-name references) t))
-                    (cond
-                      ((equal function-name "dojo.declare")
-                       (if (eq (asn-type (first args)) :string)
-                           (setf (gethash (token-value (asn-children (first args))) defines) resource))
-                       )
-                       
-                      ((equal function-name "dojo.mixin")
-                       (let ((root (get-asn-name-root (first args)))
-                             (name (and root (get-ast-name (first args))))
-                             (plist (and (eq (asn-type (second args)) :object) (asn-children (second args)))))
-                         (if (and root (not (lexical-var-p root)))
-                             (dolist (prop plist)
-                               (setf (gethash (concatenate 'string name "." (get-ast-name (car prop))) defines) resource))))
-                       )
-
-                      )))
-                 
-                 ((:sub :comma :|\|\|| :&& :|\|| :^ :& :== :=== :!= :!== :< :> :<= :>= :instanceof :>> :<< :>>> :+ :- :* :/ :%)
-                  (traverse (car (asn-children ast)))
-                  (traverse (cdr (asn-children ast))))
-
-                 (:dot
-                  (let ((root (get-asn-name-root ast)))
-                    (if (and root (not (lexical-var-p root)))
-                        (setf (gethash (get-ast-name ast) references) t))))
-                 
-                 (:conditional
-                  ;children --> (list condition true-expr false-expr)
-                  (dolist (expr (asn-children ast))
-                    (traverse expr)))
-
-                 (t)
-                 )))
-      (traverse (resource-ast resource))
-      (format t "Defines: ")
-      (maphash (lambda (key value) (if (eq value resource) (remhash key references))) defines)
-      (maphash (lambda (key value) (if (eq value resource) (format t "~A " key))) defines)
-      (format t "~%References: ")
-      (maphash (lambda (key value) (declare (ignore value)) (format t "~A " key)) references)
-      (format t "~%")
-)))

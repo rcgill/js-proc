@@ -300,7 +300,7 @@
      ; :dot :sub :call :comma
      ; :\\ :&& :\ :^ :& :== :=== :!= :!== :< :> :<= :>= :in :instanceof :>> :<< :>>> :+ :- :* :/ :%
      ; := :+= :-= :/= :*= :%= :>>= :<<= :>>>= :~= :%= :\= :^=
-   :comment (and (token-p op) (token-comment op))
+   :comment (or (and (token-p op) (token-comment op)) (asn-comment lhs))
    :location (or location (sum-locations lhs rhs))
    :children (cons lhs rhs)))
 
@@ -642,6 +642,9 @@
      (let ((opening (get-token-and-advance))
            (args (expr-list #\)))
            (closing (get-token-and-advance)))
+       (setf (asn-comment expr) (token-comment opening))
+;(format t "~A~%" expr)
+;(format t "~A~%" (token-comment opening))
        (subscripts (as-binary-op expr :call args (sum-locations expr closing)) t)))
     
     ((and (unary-postfix-p token) allow-calls)

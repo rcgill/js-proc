@@ -121,15 +121,18 @@
 
            (dump-member (class-name member)
              ;;member is a cons (name . expr), name and expr are asn's
+             ;;-or- a cons (name . doc), name a string and doc a doc
              ;the comment may be on either the name of the expr
-             (let* ((name-asn (car member))
-                    (value-asn (cdr member))
-                    (name (token-value (asn-children name-asn)))
-                    (doc (or (asn-doc name-asn) (asn-doc value-asn))));doc could be nil
-               (if doc
-                   (progn
-                     (setf (doc-location doc) (sum-locations (asn-location name-asn) (asn-location value-asn)))
-                     (dump-doc-item (concatenate 'string class-name "." name) doc t)))))
+             (if (typep (car member) 'string)
+                 (dump-doc-item (concatenate 'string class-name "." (car member)) (cdr member) t)
+                 (let* ((name-asn (car member))
+                        (value-asn (cdr member))
+                        (name (token-value (asn-children name-asn)))
+                        (doc (or (asn-doc name-asn) (asn-doc value-asn))));doc could be nil
+                   (if doc
+                       (progn
+                         (setf (doc-location doc) (sum-locations (asn-location name-asn) (asn-location value-asn)))
+                         (dump-doc-item (concatenate 'string class-name "." name) doc t))))))
 
            (dump-types (types)
              ;;types is a type-section-vector
@@ -228,6 +231,8 @@
                           (let ((doc-string (dump-member name member)))
                             (if doc-string
                                 (setf result (concatenate 'string result "," doc-string))))) (doc-members item))
+               (if (doc-kwargs item)
+                   (setf result (concatenate 'string result "," (dump-doc-item (concatenate 'string name ".kwargs") (doc-kwargs item)))))
                result))
            )
     
