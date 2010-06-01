@@ -454,10 +454,14 @@ bombs out the regex
     (dolist (arg (cdr (cdr arg-list)))
       (if (eq (asn-type arg) :object)
           (setf (doc-members doc) (nconc (doc-members doc) (doc-properties (asn-doc arg))))
-          (let ((name (token-value (asn-children (second (asn-children arg)))))
-                (attr-doc (asn-doc arg)))
-            (setf (doc-location attr-doc) (asn-location arg))
-            (setf (doc-members doc) (nconc (list (cons name attr-doc)) (doc-members doc))))))
+          (if (equal (get-ast-name (car (asn-children arg))) "bd.makeDeferredConnects")
+              (let ((deferred-connects-doc (asn-doc arg)))
+                (setf (doc-location deferred-connects-doc) (asn-location arg))
+                (setf (doc-members doc) (nconc (list (cons "deferredConnects" deferred-connects-doc)) (doc-members doc))))
+            (let ((name (token-value (asn-children (second (asn-children arg)))))
+                  (attr-doc (asn-doc arg)))
+              (setf (doc-location attr-doc) (asn-location arg))
+              (setf (doc-members doc) (nconc (list (cons name attr-doc)) (doc-members doc)))))))
     (funcall append-doc-item class-name doc)))
 
 (defun process-dojo-declare (loc arg-list append-doc-item)
@@ -821,9 +825,6 @@ bombs out the regex
                           (dolist (arg args)
                             (traverse arg append-doc-item))))
                     (cond
-                      ((equal function-name "dojo.declare")
-                       (process-dojo-declare (asn-location ast) args append-doc-item))
-                       
                       ((equal function-name "bd.declare")
                        (process-bd-declare ast args append-doc-item))
                       
