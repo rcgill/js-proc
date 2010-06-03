@@ -453,7 +453,7 @@ bombs out the regex
        (setf (doc-supers doc) nil)))
     (dolist (arg (cdr (cdr arg-list)))
       (if (eq (asn-type arg) :object)
-          (setf (doc-members doc) (nconc (doc-members doc) (doc-properties (asn-doc arg))))
+          (and (asn-doc arg) (setf (doc-members doc) (nconc (doc-members doc) (doc-properties (asn-doc arg)))))
           (if (equal (get-ast-name (car (asn-children arg))) "bd.makeDeferredConnects")
               (let ((deferred-connects-doc (asn-doc arg)))
                 (setf (doc-location deferred-connects-doc) (asn-location arg))
