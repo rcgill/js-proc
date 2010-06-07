@@ -269,80 +269,346 @@
   nil
 )
 
-(defun backdraft-sources ()
-(let ((raw 
-"./bd/capture.js
-./bd/collections.js
-./bd/command/accelerators.js
-./bd/command/dispatch.js
-./bd/command/item.js
-./bd/command.js
-./bd/css.js
-./bd/data/dynaTreeModel.js
-./bd/data/lazyTreeModel.js
-./bd/data/rowset.js
-./bd/data/selector/ds/keyFilter.js
-./bd/data/selector/ds/simpleFilter.js
-./bd/data/selector/rs/simpleFilter.js
-./bd/async.js
-./bd/descriptor/cache.js
-./bd/descriptor/processor.js
-./bd/dijit/borderContainer.js
-./bd/dijit/button.js
-./bd/dijit/checkbox.js
-./bd/dijit/combobox.js
-./bd/dijit/console.js
-./bd/dijit/contentPane.js
-./bd/dijit/dateTextbox.js
-./bd/dijit/dialog.js
-./bd/dijit/group.js
-./bd/dijit/horizontalSlider.js
-./bd/dijit/hScrollbar.js
-./bd/dijit/labeledWidget.js
-./bd/dijit/listbox.js
-./bd/dijit/menu.js
-./bd/dijit/messagebox.js
-./bd/dijit/mixin/container.js
-./bd/dijit/mixin/core.js
-./bd/dijit/mixin/navigator.js
-./bd/dijit/pane.js
-./bd/dijit/radioGroup.js
-./bd/dijit/root.js
-./bd/dijit/scrollbar.js
-./bd/dijit/staticText.js
-./bd/dijit/statusbar.js
-./bd/dijit/tabContainer.js
-./bd/dijit/textbox.js
-./bd/dijit/tree.js
-./bd/dijit/verticalSlider.js
-./bd/dijit/vScrollbar.js
-./bd/frenzy.js
-./bd/lang.js
-./bd/namespace.js
-./bd/parentSpace.js
-./bd/resources/commandItems.js
-./bd/test/loader.js
-./bd/test/matchers.js
-./bd/test/mockFrenzyServer.js
-./bd/test/mockXhr.js
-./bd/test/moduleWrapper.js
-./bd/test/proc.js
-./bd/test/publisher.js
-./bd/test/result.js
-./bd/test/space.js
-./bd/test.js
-./bd/types.js
-./bd/init.js
-./bd/start.js
-./bd/symbols.js
-./bd/loader.js"))
-  (setf raw (cl-ppcre:regex-replace-all "\\./" raw ""))
-  (setf raw (cl-ppcre:regex-replace-all "\\.js" raw ""))
-  (setf raw (cl-ppcre:regex-replace-all "/" raw "."))
-  (setf raw (cl-ppcre:split "\\n" raw))
-  (setf raw (remove "bd.test.moduleWrapper" raw :test 'equal))
-raw
-))
-;;TODO add files to ignore
-;;TODO don't delete dojo.requires from modules that are not part of the scan
-;;e.g., don'te delete dojo modules when only checking backdraft dependencies
+(defparameter docder-sources
+  '(
+    "/dojo/dojo/dojo-ng.js"
+    "/dojo/dojo/_base/version.js"
+    "/dojo/dojo/_base/backCompat.js"
+    "/dojo/dojo/_base/kernel.js"
+    "/dojo/dojo/_base/environment/browser.js"
+    "/dojo/dojo/_base/eval.js"
+    "/dojo/dojo/_base/lang.js"
+    "/dojo/dojo/_base/array.js"
+    "/dojo/dojo/_base/unloadDetect.js"
+    "/dojo/dojo/_base/xhr.js"
+    "/dojo/dojo/_base/Color.js"
+    "/dojo/dojo/_base/declare.js"
+    "/dojo/dojo/_base/Deferred.js"
+    "/dojo/dojo/_base/json.js"
+    "/dojo/dojo/_base/window.js"
+    "/dojo/dojo/_base/connect.js"
+    "/dojo/dojo/_base/event.js"
+    "/dojo/dojo/_base/html.js"
+    "/dojo/dojo/_base/NodeList.js"
+    "/dojo/dojo/_base/query.js"
+    "/dojo/dojo/_base/fx.js"
+    "/docder-dev/js/docder.js"
+    "/bd/src/bd.js"
+    "/bd/src/bd/command/accelerators.js"
+    "/bd/src/bd/widget/menu.js"
+    "/docder-dev/js/docder/docManager.js"
+    "/docder-dev/js/docder/util.js"
+    "/docder-dev/js/docder/command.js"
+    "/docder-dev/js/docder/search.js"
+    "/docder-dev/js/docder/paneManager.js"
+    "/docder-dev/js/docder/showdown.js"
+    "/docder-dev/js/docder/pageTypes/catalogPage.js"
+    "/docder-dev/js/docder/pageTypes/document.js"
+    "/docder-dev/js/docder/pageTypes/generic.js"
+    "/bd/src/bd/kernel.js"
+    "/bd/src/bd/lang.js"
+    "/bd/src/bd/declare.js"
+    "/bd/src/bd/hash.js"
+    "/bd/src/bd/clone.js"
+    "/bd/src/bd/equal.js"
+    "/bd/src/bd/connect.js"
+    "/bd/src/bd/collections.js"
+    "/bd/src/bd/string.js"
+    "/bd/src/bd/creators.js"
+    "/bd/src/bd/start.js"
+    "/bd/src/bd/command/namespace.js"
+    "/bd/src/bd/command/item.js"
+    "/bd/src/bd/command/dispatch.js"
+    "/bd/src/bd/stateful.js"
+    "/bd/src/bd/containable.js"
+    "/bd/src/bd/dijit/compat.js"
+    "/dojo/dijit/CheckedMenuItem.js"
+    "/dojo/dijit/Menu.js"
+    "/dojo/dijit/MenuBar.js"
+    "/dojo/dijit/MenuBarItem.js"
+    "/dojo/dijit/MenuSeparator.js"
+    "/dojo/dijit/PopupMenuBarItem.js"
+    "/dojo/dijit/PopupMenuItem.js"
+    "/bd/src/bd/symbols.js"
+    "/bd/src/bd/widget/messageBox.js"
+    "/dojo/dojo/_base/i18n.js"
+    "/dojo/dojo/data/ItemFileWriteStore.js"
+    "/bd/src/bd/widget/staticText.js"
+    "/bd/src/bd/dijit/comboBox.js"
+    "/bd/src/bd/widget/radioGroup.js"
+    "/bd/src/bd/widget/checkBox.js"
+    "/bd/src/bd/descriptor/processor.js"
+    "/bd/src/bd/widget/pane.js"
+    "/dojo/dijit/_base.js"
+    "/bd/src/bd/namespace.js"
+    "/bd/src/bd/async.js"
+    "/dojo/dijit/MenuItem.js"
+    "/dojo/dojo/window.js"
+    "/dojo/dijit/_Widget.js"
+    "/dojo/dijit/_KeyNavContainer.js"
+    "/dojo/dijit/_Templated.js"
+    "/dojo/dijit/_Contained.js"
+    "/bd/src/bd/widget/dialog.js"
+    "/bd/src/bd/dijit/button.js"
+    "/dojo/dojo/data/ItemFileReadStore.js"
+    "/bd/src/bd/visual.js"
+    "/dojo/dijit/form/ComboBox.js"
+    "/bd/src/bd/widget/labeled.js"
+    "/bd/src/bd/css.js"
+    "/bd/src/bd/widget/stateButton.js"
+    "/bd/src/bd/container.js"
+    "/bd/src/bd/navigator.js"
+    "/dojo/dijit/_base/focus.js"
+    "/dojo/dijit/_base/manager.js"
+    "/dojo/dijit/_base/place.js"
+    "/dojo/dijit/_base/popup.js"
+    "/dojo/dijit/_base/scroll.js"
+    "/dojo/dijit/_base/sniff.js"
+    "/dojo/dijit/_base/typematic.js"
+    "/dojo/dijit/_base/wai.js"
+    "/dojo/dijit/_base/window.js"
+    "/bd/src/bd/dom.js"
+    "/dojo/dijit/_CssStateMixin.js"
+    "/dojo/dijit/_Container.js"
+    "/dojo/dojo/string.js"
+    "/dojo/dojo/parser.js"
+    "/dojo/dojo/cache.js"
+    "/bd/src/bd/focusable.js"
+    "/bd/src/bd/mouseable.js"
+    "/bd/src/bd/htmlGen.js"
+    "/bd/src/bd/mouse.js"
+    "/dojo/dojo/dnd/Moveable.js"
+    "/dojo/dojo/dnd/TimedMoveable.js"
+    "/dojo/dijit/form/Button.js"
+    "/dojo/dojo/data/util/filter.js"
+    "/dojo/dojo/data/util/simpleFetch.js"
+    "/dojo/dojo/date/stamp.js"
+    "/bd/src/bd/id.js"
+    "/bd/src/bd/connectable.js"
+    "/bd/src/bd/cssStateful.js"
+    "/dojo/dojo/regexp.js"
+    "/dojo/dijit/form/_FormWidget.js"
+    "/dojo/dijit/form/ValidationTextBox.js"
+    "/dojo/dojo/AdapterRegistry.js"
+    "/dojo/dojo/uacss.js"
+    "/dojo/dojo/_base/text.js"
+    "/bd/src/bd/interactive.js"
+    "/dojo/dojo/dnd/Mover.js"
+    "/dojo/dijit/_HasDropDown.js"
+    "/dojo/dojo/data/util/sorter.js"
+    "/dojo/dojo/i18n.js"
+    "/dojo/dijit/form/TextBox.js"
+    "/dojo/dijit/Tooltip.js"
+    "/dojo/dojo/dnd/common.js"
+    "/dojo/dojo/dnd/autoscroll.js"
+    "/bd/src/bd/nls/command.js"
+    "/dojo/dijit/nls/common.js"
+    "/dojo/dijit/form/nls/ComboBox.js"
+    "/dojo/dijit/form/nls/validate.js"
+    "/bd/src/bd/widget/root.js"
+    "/bd/src/bd/widget/borderContainer.js"
+    "/bd/src/bd/dijit/tree.js"
+    "/bd/src/bd/widget/statusbar.js"
+    "/dojo/dijit/Tree.js"
+    "/dojo/dojo/fx.js"
+    "/dojo/dojo/DeferredList.js"
+    "/dojo/dojo/cookie.js"
+    "/dojo/dijit/tree/TreeStoreModel.js"
+    "/dojo/dijit/tree/ForestStoreModel.js"
+    "/dojo/dojo/fx/Toggler.js"
+    "/docder-dev/catalog.js"
+    "/bd/src/bd/buildTools.js"))
+
+(defun map-filename (filename)
+  (cond
+    ((equal (subseq filename 0 8) "/bd/src/")
+     (concatenate 'string "/home/rcgill/dev/backdraft/src/" (subseq filename 8)))
+    ((equal (subseq filename 0 11) "/dojo/dojo/")
+     (concatenate 'string "/home/rcgill/dev/dojo/dojo/" (subseq filename 11)))
+    ((equal (subseq filename 0 12) "/dojo/dijit/")
+     (concatenate 'string "/home/rcgill/dev/dojo/dijit/" (subseq filename 12)))
+    ((equal (subseq filename 0 12) "/docder-dev/")
+     (concatenate 'string "/home/rcgill/dev/docder/src/" (subseq filename 12)))))
+
+(defparameter css-url-scanner
+  (cl-ppcre:create-scanner "url\\(\\s*('|\")?([^\"\']+)('|\")?\\s*\\)"))
+
+(defparameter css-import-scanner
+  (cl-ppcre:create-scanner "^\\s*@import\\s*url"))
+
+(defparameter css-comment-start
+  (cl-ppcre:create-scanner "/\\*"))
+
+(defparameter css-comment-end
+  (cl-ppcre:create-scanner "\\*/"))
+
+(defparameter css-newline-scanner
+  (cl-ppcre:create-scanner "
+"))
+
+(defun read-css-source (filename)
+  (let ((input (make-array 100000 :element-type 'character))
+        (stripped-input ""))
+    (with-open-file (in (map-filename filename))
+      (let ((length (read-sequence input in)))
+        (do ((p 0))
+            ((>= p length))
+          (let ((start (cl-ppcre:scan css-comment-start input :start p :end length)))
+            (if start
+                (setf stripped-input (concatenate 'string stripped-input (subseq input p start))
+                      p (multiple-value-bind (start end) (cl-ppcre:scan css-comment-end input :start p :end length) end))
+                (setf stripped-input (concatenate 'string stripped-input (subseq input p length))
+                      p length)
+                )))))
+    (remove-if (lambda (line) (eq (length line) 0)) (map 'list (lambda (line) (string-trim '(#\Space #\Tab) line)) (cl-ppcre:split css-newline-scanner stripped-input)))))
+        
+
+(defun test ()
+  (read-css-source "/dojo/dijit/themes/dijit.css")
+nil)
+
+(defvar cssid)
+
+(defvar batch)
+
+(defun dump-css(dest root filename)
+  (if (not (equal (subseq filename 0 1) "/"))
+      (setf filename (concatenate 'string root filename)))
+  (let ((path (directory-namestring (pathname filename)))
+        (lines (read-css-source filename)))
+    ;(format t "travering ~A with root ~A, new root will be ~A~%~A~%" filename root path lines)
+    (map nil (lambda (line)
+               (multiple-value-bind (start end reg-starts reg-ends) (cl-ppcre:scan css-url-scanner line)
+                 (if start
+                     (let* ((url-start (aref reg-starts 1))
+                            (url-end (aref reg-ends 1))
+                            (url (subseq line url-start url-end)))
+                       (if (not (eq (aref reg-starts 0) (aref reg-ends 0)))
+                           (progn (decf url-start) (incf url-end)))
+                       (if (cl-ppcre:scan css-import-scanner line)
+                           (dump-css dest path url)
+                           (let ((compressed-filename (format nil "_~A.~A" (incf cssid) (pathname-type (pathname url)))))
+                             (format dest "~A~A~A~%" (subseq line 0 url-start) compressed-filename (subseq line url-end))
+                             (setf batch (cons (format nil "cp ~A ~A" (map-filename (concatenate 'string path url)) compressed-filename) batch)))))
+                     (format dest "~A~%" line)))) lines)))
+
+(defun dump-css-docder()
+  (setf cssid 0 batch nil)
+  (with-open-file (dest "/home/rcgill/dev/docder/src/ccss/ccss.css" :direction :output :if-exists :supersede)
+    (dump-css dest "/docder-dev/" "config.css"))
+  (with-open-file (dest "/home/rcgill/dev/docder/src/ccss/ccss.sh" :direction :output :if-exists :supersede)
+    (dolist (line batch)
+      (format dest "~A~%" line))))
+
+(defun dump (dest filename)
+  (let ((result (make-array 100000 :element-type 'character)))
+    (with-open-file (in filename)
+      (let ((length (read-sequence result in)))
+        (write-sequence result dest :start 0 :end length)))))
+
+;
+; NOTE: must manuall set pause=[] and resume in build.js
+;
+
+(defun build-docder ()
+  (with-open-file (dest "/home/rcgill/dev/docder/src/build.js" :direction :output :if-exists :supersede)
+    (dolist (filename docder-sources)
+      (dump dest (map-filename filename)))))
+
+(defparameter cache-files (list
+                           "/dojo/dojo/../dijit/templates/MenuItem.html"
+                           "/dojo/dojo/../dijit/templates/CheckedMenuItem.html"
+                           "/dojo/dojo/../dijit/templates/MenuSeparator.html"
+                           "/dojo/dojo/../dijit/templates/Menu.html"
+                           "/dojo/dojo/../dijit/templates/MenuBar.html"
+                           "/dojo/dojo/../dijit/templates/MenuBarItem.html"
+                           "/dojo/dojo/../dijit/form/templates/Button.html"
+                           "/dojo/dojo/../dijit/form/templates/DropDownButton.html"
+                           "/dojo/dojo/../dijit/form/templates/ComboButton.html"
+                           "/dojo/dojo/../dijit/form/templates/TextBox.html"
+                           "/dojo/dojo/../dijit/templates/Tooltip.html"
+                           "/dojo/dojo/../dijit/form/templates/ValidationTextBox.html"
+                           "/dojo/dojo/../dijit/form/templates/ComboBox.html"
+                           "/dojo/dojo/../dijit/templates/TreeNode.html"
+                           "/dojo/dojo/../dijit/templates/Tree.html"))
+
+
+(defun dump-cache (dest)
+  (dolist (url cache-files)
+    (let ((filename (concatenate 'string "/home/rcgill/dev/dojo" (subseq url 13)))
+          (text (make-array 100000 :element-type 'character)))
+      (with-open-file (in filename)
+        (let ((length (read-sequence text in)))
+          (format dest "*~A*~A*~A" url length (subseq text 0 length)))))))
+
+(defparameter dijits "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+(defvar d1)
+(defvar d2)
+(defvar d3)
+(defvar d1c)
+(defvar d2c)
+(defvar d3c)
+
+(defun inc-d1 ()
+  (incf d1)
+  (setf d1c (subseq dijits d1 (1+ d1))))
+
+(defun inc-d2 ()
+  (if (eq d2 51)
+      (and (setf d2 0) (inc-d1))
+      (incf d2))
+  (setf d2c (subseq dijits d2 (1+ d2))))
+
+(defun inc-id ()
+  (if (eq d3 51)
+      (and (setf d3 0) (inc-d2))
+      (incf d3))
+  (setf d3c (subseq dijits d3 (1+ d3)))
+  (concatenate 'string d1c d2c d3c))
+
+
+(defun get-cid (count id) 
+  (if (and (equal count 1) (> (length id) 3))
+      id
+      (inc-id)))
+
+(defparameter id-scanner
+  (cl-ppcre:create-scanner "[a-zA-Z][a-zA-Z0-9_]*"))
+
+(defun compress ()
+  (setf d1 -1
+        d2 -1
+        d3 -1
+        d1c ""
+        d2c ""
+        d3c "")
+  (let ((input (make-array 1000000 :element-type 'character))
+        (dictionary (make-hash-table :test #'equal)))
+    (with-open-file (in "/home/rcgill/dev/docder/src/buildc.js")
+      (let ((length (read-sequence input in)))
+        (do ((p 0))
+            ((>= p length))
+          (multiple-value-bind (start end) (cl-ppcre:scan id-scanner input :start p :end length)
+            (if (not (eq start nil))
+                (let ((id (subseq input start end)))
+                  (setf (gethash id dictionary) (1+ (gethash id dictionary 0))
+                        p end))
+                (setf p length))))
+        (let ((sorted (make-array (hash-table-count dictionary) :fill-pointer 0)))
+          (maphash (lambda (id count) (vector-push (cons count id) sorted)) dictionary)
+          (map nil (lambda (item) (setf (gethash (cdr item) dictionary) (get-cid (car item) (cdr item)))) (sort sorted (lambda (lhs rhs) (> (car lhs) (car rhs))))))
+        (with-open-file (dest "/home/rcgill/dev/docder/src/buildcc.js" :direction :output :if-exists :supersede)
+          (dump-cache dest)
+          (maphash (lambda (id cid) (if (<= (length cid) 3) (format dest "~A:~A," cid id))) dictionary)
+          (write-line "}" dest)
+          (do ((p 0))
+              ((>= p length))
+            (multiple-value-bind (start end) (cl-ppcre:scan id-scanner input :start p :end length)
+              (if (not (eq start nil))
+                  (progn
+                    (write-sequence (subseq input p start) dest)
+                    (write-sequence (gethash (subseq input start end) dictionary) dest)
+                    (setf p end))
+                  (progn
+                    (write-sequence (subseq input p length) dest)
+                    (setf p length))))))))))
